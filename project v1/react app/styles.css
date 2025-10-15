@@ -1,0 +1,13 @@
+/* styles.css */
+body {
+    font-family: Arial, sans-serif;
+}
+
+h1 {
+    text-align: center;
+}
+
+#result {
+    margin-top: 20px;
+    text-align: center;
+}

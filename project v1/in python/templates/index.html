@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Timetable Generator</title>
+</head>
+<body>
+    <h1>Timetable Generator</h1>
+    <form id="timetableForm">
+        Rooms: <input type="text" id="rooms" placeholder="Room101, Room102"><br>
+        Timeslots: <input type="text" id="times" placeholder="9:00 AM, 10:00 AM"><br>
+        Courses: <input type="text" id="courses" placeholder="Math 101, Science 101"><br>
+        Instructors: <input type="text" id="instructors" placeholder="Prof A, Prof B"><br>
+        <button type="button" onclick="submitForm()">Submit</button>
+    </form>
+    <h2>Results</h2>
+    <div id="results"></div>
+
+    <script src="scripts.js"></script>
+</body>
+</html>
