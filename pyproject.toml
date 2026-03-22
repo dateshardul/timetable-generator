@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "timetable-generator"
+version = "0.1.0"
+description = "Quantum-capable timetable generator using game-theoretic graph coloring"
+requires-python = ">=3.10"
+dependencies = [
+    "networkx>=3.1",
+    "numpy>=1.24",
+    "flask>=3.0",
+    "click>=8.0",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=7.0"]
+quantum = [
+    "dwave-ocean-sdk>=6.0",
+    "qiskit>=1.0",
+    "qiskit-optimization>=0.6",
+]
+
+[project.scripts]
+timetable = "src.cli.main:cli"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

@@ -1,0 +1,16 @@
+# Core
+networkx>=3.1
+numpy>=1.24
+flask>=3.0
+click>=8.0
+matplotlib>=3.7
+
+# Quantum backends (Phase 2+)
+# Uncomment when ready to integrate:
+# dwave-ocean-sdk>=6.0        # D-Wave quantum annealing
+# amazon-braket-sdk>=1.50     # Amazon Braket (multi-backend)
+# qiskit>=1.0                 # IBM gate-based QAOA
+# qiskit-optimization>=0.6    # QAOA for combinatorial optimization
+
+# Testing
+pytest>=7.0

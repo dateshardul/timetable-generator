@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Timetable — Stakeholder Portal</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>📅</text></svg>">
+    <style>
+        *{margin:0;padding:0;box-sizing:border-box;}
+        html,body{height:100%;font-family:'Segoe UI',system-ui,sans-serif;background:#0f1419;color:#e7e9ea;}
+
+        .header{padding:12px 24px;background:#1a1f2e;border-bottom:1px solid #2d3748;display:flex;align-items:center;justify-content:space-between;gap:16px;}
+        .header h1{font-size:18px;font-weight:600;}
+        .header a{color:#58a6ff;text-decoration:none;font-size:13px;}
+        .header a:hover{text-decoration:underline;}
+
+        .container{max-width:720px;margin:0 auto;padding:24px 16px;}
+
+        .card{background:#1a1f2e;border:1px solid #2d3748;border-radius:8px;padding:20px;margin-bottom:16px;}
+        .card h2{font-size:16px;color:#58a6ff;margin-bottom:12px;}
+        .card h3{font-size:14px;color:#8b949e;margin-bottom:8px;margin-top:16px;}
+        .card p{font-size:13px;color:#8b949e;line-height:1.5;margin-bottom:12px;}
+
+        label{display:block;font-size:13px;color:#8b949e;margin-bottom:4px;}
+        select,input[type="text"]{background:#0d1117;border:1px solid #30363d;color:#e7e9ea;padding:8px 12px;border-radius:6px;font-size:14px;width:100%;}
+        select:focus,input:focus{outline:none;border-color:#58a6ff;}
+
+        .btn{padding:10px 20px;border:1px solid #30363d;background:#21262d;color:#e7e9ea;border-radius:6px;cursor:pointer;font-size:14px;white-space:nowrap;}
+        .btn:hover{background:#30363d;}
+        .btn.primary{background:#238636;border-color:#238636;}
+        .btn.primary:hover{background:#2ea043;}
+        .btn:disabled{opacity:0.4;cursor:not-allowed;}
+
+        .role-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:16px;}
+        .role-card{background:#161b22;border:2px solid #30363d;border-radius:8px;padding:16px;cursor:pointer;text-align:center;transition:all 0.2s;}
+        .role-card:hover{border-color:#58a6ff;background:#1a1f2e;}
+        .role-card.selected{border-color:#58a6ff;background:#58a6ff11;}
+        .role-card .role-icon{font-size:32px;margin-bottom:8px;}
+        .role-card .role-name{font-size:14px;font-weight:600;}
+        .role-card .role-desc{font-size:12px;color:#8b949e;margin-top:4px;}
+
+        .form-row{display:flex;gap:12px;margin-bottom:12px;align-items:end;flex-wrap:wrap;}
+        .form-row>*{flex:1;min-width:140px;}
+
+        .ts-grid{display:grid;grid-template-columns:auto repeat(6,1fr);gap:2px;font-size:12px;margin:8px 0;}
+        .ts-grid .th{background:#21262d;padding:5px 4px;text-align:center;font-weight:600;color:#8b949e;border-radius:4px;font-size:11px;}
+        .ts-grid .cell{padding:4px;text-align:center;border-radius:4px;cursor:pointer;border:1px solid transparent;font-size:11px;}
+        .ts-grid .cell.preferred{background:#238636;color:#fff;}
+        .ts-grid .cell.unavailable{background:#f85149;color:#fff;}
+        .ts-grid .cell.neutral{background:#161b22;color:#484f58;}
+        .ts-grid .cell:hover{border-color:#58a6ff;}
+
+        .ts-legend{display:flex;gap:16px;font-size:12px;color:#8b949e;margin:8px 0;flex-wrap:wrap;}
+        .ts-legend span{display:flex;align-items:center;gap:4px;}
+        .ts-legend .dot{width:12px;height:12px;border-radius:3px;}
+
+        .course-list{margin:8px 0;}
+        .course-item{display:flex;align-items:center;gap:10px;padding:8px 12px;background:#161b22;border:1px solid #30363d;border-radius:6px;margin-bottom:6px;cursor:pointer;transition:all 0.15s;}
+        .course-item:hover{border-color:#58a6ff;}
+        .course-item.selected{border-color:#58a6ff;background:#58a6ff11;}
+        .course-item .check{width:18px;height:18px;border:2px solid #30363d;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:12px;flex-shrink:0;}
+        .course-item.selected .check{border-color:#58a6ff;background:#58a6ff;color:#fff;}
+        .course-item .info{flex:1;}
+        .course-item .info .name{font-size:14px;}
+        .course-item .info .meta{font-size:12px;color:#8b949e;}
+
+        .equip-tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;}
+        .equip-tag{background:#30363d;padding:3px 10px;border-radius:10px;font-size:12px;}
+        .equip-input{display:flex;gap:6px;margin-top:8px;}
+        .equip-input input{flex:1;}
+        .equip-input .btn{padding:6px 12px;font-size:12px;}
+
+        .success-banner{background:#23863622;border:1px solid #238636;color:#3fb950;padding:12px;border-radius:6px;font-size:14px;display:none;margin-bottom:12px;text-align:center;}
+        .success-banner.visible{display:block;}
+        .error-banner{background:#f8514922;border:1px solid #f85149;color:#f85149;padding:12px;border-radius:6px;font-size:14px;display:none;margin-bottom:12px;}
+        .error-banner.visible{display:block;}
+
+        .brush-btn{padding:5px 12px;border:2px solid transparent;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;transition:all 0.15s;}
+        .brush-btn.active{border-color:#fff !important;box-shadow:0 0 0 2px #58a6ff;}
+        .brush-btn:hover{opacity:0.85;}
+        .ts-grid .th.clickable{cursor:pointer;}
+        .ts-grid .th.clickable:hover{background:#30363d;color:#e7e9ea;}
+
+        .hidden{display:none !important;}
+
+        @media(max-width:600px){
+            .container{padding:12px 8px;}
+            .role-cards{grid-template-columns:1fr 1fr;}
+            .form-row>*{min-width:100%;}
+            .ts-grid{font-size:10px;}
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Stakeholder Portal</h1>
+        <a href="/viz">Admin View &rarr;</a>
+    </div>
+
+    <div class="container">
+        <!-- Step 1: Pick Role -->
+        <div class="card" id="step-role">
+            <h2>Who are you?</h2>
+            <p>Select your role to submit your scheduling preferences.</p>
+            <div class="role-cards" id="role-cards">
+                <div class="role-card" data-role="teacher">
+                    <div class="role-icon">&#128218;</div>
+                    <div class="role-name">Teacher</div>
+                    <div class="role-desc">Set courses you teach &amp; preferred timeslots</div>
+                </div>
+                <div class="role-card" data-role="student_group">
+                    <div class="role-icon">&#127891;</div>
+                    <div class="role-name">Student Group</div>
+                    <div class="role-desc">Select courses &amp; preferred timeslots</div>
+                </div>
+                <div class="role-card" data-role="room">
+                    <div class="role-icon">&#127963;</div>
+                    <div class="role-name">Room / Facility</div>
+                    <div class="role-desc">Set availability, capacity &amp; equipment</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 2: Identity -->
+        <div class="card hidden" id="step-identity">
+            <h2 id="identity-title">Identify Yourself</h2>
+            <div class="form-row">
+                <div><label id="id-label">Your ID</label><input type="text" id="entity-id" placeholder="e.g. T1"></div>
+                <div><label>Your Name</label><input type="text" id="entity-name" placeholder="e.g. Dr. Smith"></div>
+            </div>
+            <div id="extra-identity-fields"></div>
+            <div style="margin-top:12px;">
+                <button class="btn" id="btn-back-role">Back</button>
+                <button class="btn primary" id="btn-next-prefs">Next &rarr;</button>
+            </div>
+        </div>
+
+        <!-- Step 3: Preferences (role-specific) -->
+        <div class="card hidden" id="step-prefs">
+            <h2 id="prefs-title">Your Preferences</h2>
+
+            <!-- Teacher: pick courses -->
+            <div class="hidden" id="pref-teacher-courses">
+                <h3>Courses You Teach</h3>
+                <p>Select courses and set lectures per week. You can type new course IDs.</p>
+                <div id="teacher-course-list"></div>
+                <div class="form-row" style="margin-top:8px;">
+                    <div><input type="text" id="new-course-id" placeholder="Course ID (e.g. CS301)"></div>
+                    <div><input type="text" id="new-course-name" placeholder="Course Name"></div>
+                    <div style="flex:0;"><button class="btn" id="btn-add-course">Add</button></div>
+                </div>
+            </div>
+
+            <!-- Student Group: pick courses -->
+            <div class="hidden" id="pref-group-courses">
+                <h3>Courses Your Group Takes</h3>
+                <p>Select the courses this student group is enrolled in.</p>
+                <div id="group-course-list"></div>
+                <div class="form-row" style="margin-top:8px;">
+                    <div><input type="text" id="new-group-course-id" placeholder="Course ID"></div>
+                    <div><input type="text" id="new-group-course-name" placeholder="Course Name"></div>
+                    <div style="flex:0;"><button class="btn" id="btn-add-group-course">Add</button></div>
+                </div>
+            </div>
+
+            <!-- Room: capacity + equipment -->
+            <div class="hidden" id="pref-room-details">
+                <h3>Room Details</h3>
+                <div class="form-row">
+                    <div><label>Capacity</label><input type="number" id="room-capacity" value="40" min="1"></div>
+                    <div><label>Room Type</label>
+                        <select id="room-type"><option value="lecture">Lecture</option><option value="lab">Lab</option></select>
+                    </div>
+                </div>
+                <h3>Equipment</h3>
+                <div class="equip-tags" id="equip-tags"></div>
+                <div class="equip-input">
+                    <input type="text" id="new-equip" placeholder="e.g. projector, oscilloscope">
+                    <button class="btn" id="btn-add-equip">Add</button>
+                </div>
+            </div>
+
+            <!-- Timeslot preferences (all roles) -->
+            <h3 style="margin-top:20px;" id="ts-pref-heading">Timeslot Preferences</h3>
+            <p id="ts-pref-desc">Pick a brush, then click or drag across cells. Click a day header to fill a column, or an hour header to fill a row.</p>
+            <div style="display:flex;align-items:center;gap:8px;margin:10px 0;flex-wrap:wrap;">
+                <span style="font-size:13px;color:#8b949e;">Brush:</span>
+                <button class="brush-btn active" data-brush="preferred" style="background:#238636;color:#fff;">&#10003; Preferred</button>
+                <button class="brush-btn" data-brush="unavailable" style="background:#f85149;color:#fff;">&#10007; Unavailable</button>
+                <button class="brush-btn" data-brush="neutral" style="background:#161b22;color:#8b949e;border:1px solid #30363d;">&#9711; Clear</button>
+                <span style="border-left:1px solid #30363d;height:24px;margin:0 4px;"></span>
+                <button class="btn" id="btn-pref-all-preferred" style="padding:5px 10px;font-size:12px;">All Preferred</button>
+                <button class="btn" id="btn-pref-weekdays" style="padding:5px 10px;font-size:12px;">Weekdays 9-4</button>
+                <button class="btn" id="btn-pref-clear-all" style="padding:5px 10px;font-size:12px;">Clear All</button>
+            </div>
+            <div class="ts-grid" id="pref-ts-grid" style="user-select:none;"></div>
+
+            <div style="margin-top:16px;display:flex;gap:8px;">
+                <button class="btn" id="btn-back-identity">Back</button>
+                <button class="btn primary" id="btn-submit">Submit Preferences</button>
+            </div>
+        </div>
+
+        <!-- Success -->
+        <div class="success-banner" id="success-banner"></div>
+        <div class="error-banner" id="portal-error"></div>
+    </div>
+
+    <script>
+    const DAYS = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+    const HOURS = [
+        {hour:8,label:"8 AM"},{hour:9,label:"9 AM"},{hour:10,label:"10 AM"},
+        {hour:11,label:"11 AM"},{hour:12,label:"12 PM"},{hour:13,label:"1 PM"},
+        {hour:14,label:"2 PM"},{hour:15,label:"3 PM"},{hour:16,label:"4 PM"},
+        {hour:17,label:"5 PM"}
+    ];
+
+    let role = null;
+    let tsPrefs = {}; // key -> 'neutral'|'preferred'|'unavailable'
+    let teacherCourses = []; // [{course_id, name, lectures_per_week, selected}]
+    let groupCourses = [];
+    let equipment = [];
+
+    // ── Role Selection ──────────────────────────────────────────────────────
+    document.getElementById('role-cards').addEventListener('click', e => {
+        const card = e.target.closest('.role-card');
+        if (!card) return;
+        role = card.dataset.role;
+        document.querySelectorAll('.role-card').forEach(c => c.classList.toggle('selected', c === card));
+
+        // Show identity step
+        document.getElementById('step-identity').classList.remove('hidden');
+        document.getElementById('step-prefs').classList.add('hidden');
+        document.getElementById('success-banner').classList.remove('visible');
+
+        if (role === 'teacher') {
+            document.getElementById('identity-title').textContent = 'Teacher Details';
+            document.getElementById('id-label').textContent = 'Teacher ID';
+            document.getElementById('entity-id').placeholder = 'e.g. T1';
+            document.getElementById('entity-name').placeholder = 'e.g. Dr. Smith';
+            document.getElementById('extra-identity-fields').innerHTML = '';
+        } else if (role === 'student_group') {
+            document.getElementById('identity-title').textContent = 'Student Group Details';
+            document.getElementById('id-label').textContent = 'Group ID';
+            document.getElementById('entity-id').placeholder = 'e.g. G1';
+            document.getElementById('entity-name').placeholder = 'e.g. CS Year 1';
+            document.getElementById('extra-identity-fields').innerHTML =
+                '<div class="form-row" style="margin-top:12px;"><div><label>Group Size</label><input type="number" id="group-size" value="30" min="1"></div><div><label>Max Events/Day</label><input type="number" id="group-max-events" value="5" min="1" max="10"></div></div>';
+        } else if (role === 'room') {
+            document.getElementById('identity-title').textContent = 'Room Details';
+            document.getElementById('id-label').textContent = 'Room ID';
+            document.getElementById('entity-id').placeholder = 'e.g. R1';
+            document.getElementById('entity-name').placeholder = 'e.g. Room 101';
+            document.getElementById('extra-identity-fields').innerHTML = '';
+        }
+    });
+
+    // ── Navigation ──────────────────────────────────────────────────────────
+    document.getElementById('btn-back-role').addEventListener('click', () => {
+        document.getElementById('step-identity').classList.add('hidden');
+    });
+    document.getElementById('btn-back-identity').addEventListener('click', () => {
+        document.getElementById('step-prefs').classList.add('hidden');
+        document.getElementById('step-identity').classList.remove('hidden');
+    });
+
+    document.getElementById('btn-next-prefs').addEventListener('click', () => {
+        const id = document.getElementById('entity-id').value.trim();
+        const name = document.getElementById('entity-name').value.trim();
+        if (!id || !name) { showPortalError('Please fill in your ID and Name.'); return; }
+        hidePortalError();
+
+        document.getElementById('step-identity').classList.add('hidden');
+        document.getElementById('step-prefs').classList.remove('hidden');
+
+        // Show role-specific preference sections
+        document.getElementById('pref-teacher-courses').classList.toggle('hidden', role !== 'teacher');
+        document.getElementById('pref-group-courses').classList.toggle('hidden', role !== 'student_group');
+        document.getElementById('pref-room-details').classList.toggle('hidden', role !== 'room');
+
+        if (role === 'teacher') {
+            document.getElementById('prefs-title').textContent = 'Teacher Preferences — ' + name;
+            document.getElementById('ts-pref-heading').textContent = 'Your Preferred Teaching Times';
+            document.getElementById('ts-pref-desc').textContent = 'Mark when you prefer to teach and when you are unavailable.';
+        } else if (role === 'student_group') {
+            document.getElementById('prefs-title').textContent = 'Group Preferences — ' + name;
+            document.getElementById('ts-pref-heading').textContent = 'Preferred Class Times';
+            document.getElementById('ts-pref-desc').textContent = 'Mark when your group prefers classes and when they are unavailable.';
+        } else {
+            document.getElementById('prefs-title').textContent = 'Room Availability — ' + name;
+            document.getElementById('ts-pref-heading').textContent = 'Room Availability';
+            document.getElementById('ts-pref-desc').textContent = 'Mark when this room is available (preferred) or unavailable.';
+        }
+
+        renderPrefGrid();
+    });
+
+    // ── Timeslot Preference Grid ────────────────────────────────────────────
+    let currentBrush = 'preferred';
+    let isDragging = false;
+
+    // Brush selector
+    document.querySelectorAll('.brush-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.brush-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            currentBrush = btn.dataset.brush;
+        });
+    });
+
+    function renderPrefGrid() {
+        const grid = document.getElementById('pref-ts-grid');
+        let html = '<div class="th"></div>';
+        DAYS.forEach((d,di) => { html += `<div class="th clickable" data-day="${d}">${d.slice(0,3)}</div>`; });
+        HOURS.forEach((h, pi) => {
+            html += `<div class="th clickable" data-hour="${pi+1}">${h.label}</div>`;
+            DAYS.forEach(day => {
+                const key = `${day}-${pi+1}`;
+                const st = tsPrefs[key] || 'neutral';
+                html += `<div class="cell ${st}" data-ts="${key}">${st==='preferred'?'&#10003;':st==='unavailable'?'&#10007;':''}</div>`;
+            });
+        });
+        grid.innerHTML = html;
+    }
+
+    function paintCell(cell) {
+        const key = cell.dataset.ts;
+        if (!key) return;
+        tsPrefs[key] = currentBrush;
+        cell.className = 'cell ' + currentBrush;
+        cell.innerHTML = currentBrush === 'preferred' ? '&#10003;' : currentBrush === 'unavailable' ? '&#10007;' : '';
+    }
+
+    function setAllSlots(state) {
+        HOURS.forEach((_, pi) => DAYS.forEach(d => { tsPrefs[`${d}-${pi+1}`] = state; }));
+        renderPrefGrid();
+    }
+
+    function setDaySlots(day, state) {
+        HOURS.forEach((_, pi) => { tsPrefs[`${day}-${pi+1}`] = state; });
+        renderPrefGrid();
+    }
+
+    function setHourSlots(period, state) {
+        DAYS.forEach(d => { tsPrefs[`${d}-${period}`] = state; });
+        renderPrefGrid();
+    }
+
+    const prefGrid = document.getElementById('pref-ts-grid');
+
+    // Drag-to-paint
+    prefGrid.addEventListener('mousedown', e => {
+        const cell = e.target.closest('.cell');
+        if (cell) { isDragging = true; paintCell(cell); e.preventDefault(); }
+    });
+    prefGrid.addEventListener('mouseover', e => {
+        if (!isDragging) return;
+        const cell = e.target.closest('.cell');
+        if (cell) paintCell(cell);
+    });
+    document.addEventListener('mouseup', () => { isDragging = false; });
+
+    // Touch drag support
+    prefGrid.addEventListener('touchstart', e => {
+        const cell = e.target.closest('.cell');
+        if (cell) { isDragging = true; paintCell(cell); e.preventDefault(); }
+    }, {passive:false});
+    prefGrid.addEventListener('touchmove', e => {
+        if (!isDragging) return;
+        const touch = e.touches[0];
+        const el = document.elementFromPoint(touch.clientX, touch.clientY);
+        const cell = el?.closest?.('.cell');
+        if (cell && prefGrid.contains(cell)) paintCell(cell);
+        e.preventDefault();
+    }, {passive:false});
+    document.addEventListener('touchend', () => { isDragging = false; });
+
+    // Click headers to fill column (day) or row (hour)
+    prefGrid.addEventListener('click', e => {
+        const th = e.target.closest('.th.clickable');
+        if (th) {
+            if (th.dataset.day) setDaySlots(th.dataset.day, currentBrush);
+            else if (th.dataset.hour) setHourSlots(th.dataset.hour, currentBrush);
+            return;
+        }
+        // Single click still works (for non-drag)
+        const cell = e.target.closest('.cell');
+        if (cell && !isDragging) paintCell(cell);
+    });
+
+    // Quick-select buttons
+    document.getElementById('btn-pref-all-preferred').addEventListener('click', () => setAllSlots('preferred'));
+    document.getElementById('btn-pref-clear-all').addEventListener('click', () => setAllSlots('neutral'));
+    document.getElementById('btn-pref-weekdays').addEventListener('click', () => {
+        setAllSlots('neutral');
+        HOURS.forEach((h, pi) => {
+            if (h.hour >= 9 && h.hour <= 15) DAYS.slice(0,5).forEach(d => { tsPrefs[`${d}-${pi+1}`] = 'preferred'; });
+        });
+        renderPrefGrid();
+    });
+
+    // ── Teacher Course Selection ────────────────────────────────────────────
+    function renderTeacherCourses() {
+        document.getElementById('teacher-course-list').innerHTML = teacherCourses.map((c, i) =>
+            `<div class="course-item ${c.selected?'selected':''}" data-idx="${i}">
+                <div class="check">${c.selected?'&#10003;':''}</div>
+                <div class="info"><div class="name">${c.name||c.course_id}</div><div class="meta">${c.course_id} &middot; ${c.lectures_per_week} lec/week</div></div>
+            </div>`
+        ).join('');
+    }
+
+    document.getElementById('teacher-course-list').addEventListener('click', e => {
+        const item = e.target.closest('.course-item');
+        if (!item) return;
+        const c = teacherCourses[item.dataset.idx];
+        c.selected = !c.selected;
+        renderTeacherCourses();
+    });
+
+    document.getElementById('btn-add-course').addEventListener('click', () => {
+        const id = document.getElementById('new-course-id').value.trim();
+        const name = document.getElementById('new-course-name').value.trim();
+        if (!id) return;
+        teacherCourses.push({course_id:id, name:name||id, lectures_per_week:3, selected:true});
+        document.getElementById('new-course-id').value = '';
+        document.getElementById('new-course-name').value = '';
+        renderTeacherCourses();
+    });
+
+    // ── Student Group Course Selection ──────────────────────────────────────
+    function renderGroupCourses() {
+        document.getElementById('group-course-list').innerHTML = groupCourses.map((c, i) =>
+            `<div class="course-item ${c.selected?'selected':''}" data-idx="${i}">
+                <div class="check">${c.selected?'&#10003;':''}</div>
+                <div class="info"><div class="name">${c.name||c.course_id}</div><div class="meta">${c.course_id}</div></div>
+            </div>`
+        ).join('');
+    }
+
+    document.getElementById('group-course-list').addEventListener('click', e => {
+        const item = e.target.closest('.course-item');
+        if (!item) return;
+        groupCourses[item.dataset.idx].selected = !groupCourses[item.dataset.idx].selected;
+        renderGroupCourses();
+    });
+
+    document.getElementById('btn-add-group-course').addEventListener('click', () => {
+        const id = document.getElementById('new-group-course-id').value.trim();
+        const name = document.getElementById('new-group-course-name').value.trim();
+        if (!id) return;
+        groupCourses.push({course_id:id, name:name||id, selected:true});
+        document.getElementById('new-group-course-id').value = '';
+        document.getElementById('new-group-course-name').value = '';
+        renderGroupCourses();
+    });
+
+    // ── Room Equipment ──────────────────────────────────────────────────────
+    function renderEquipment() {
+        document.getElementById('equip-tags').innerHTML = equipment.map((eq, i) =>
+            `<span class="equip-tag">${eq} <span style="cursor:pointer;color:#f85149;margin-left:4px;" data-eq-idx="${i}">&times;</span></span>`
+        ).join('');
+    }
+
+    document.getElementById('equip-tags').addEventListener('click', e => {
+        if (e.target.dataset.eqIdx !== undefined) {
+            equipment.splice(e.target.dataset.eqIdx, 1);
+            renderEquipment();
+        }
+    });
+
+    document.getElementById('btn-add-equip').addEventListener('click', () => {
+        const val = document.getElementById('new-equip').value.trim();
+        if (!val) return;
+        val.split(',').forEach(v => { if (v.trim()) equipment.push(v.trim()); });
+        document.getElementById('new-equip').value = '';
+        renderEquipment();
+    });
+
+    // ── Submit ──────────────────────────────────────────────────────────────
+    document.getElementById('btn-submit').addEventListener('click', async () => {
+        const entityId = document.getElementById('entity-id').value.trim();
+        const entityName = document.getElementById('entity-name').value.trim();
+
+        // Build timeslot preferences as weights
+        const weights = [];
+        Object.entries(tsPrefs).forEach(([key, pref]) => {
+            if (pref === 'neutral') return;
+            const [day, ps] = key.split('-');
+            const period = parseInt(ps);
+            const hour = HOURS[period-1]?.hour || (7+period);
+            weights.push({
+                day, period, start_hour:hour, start_minute:0, duration_minutes:60,
+                weight: pref === 'preferred' ? 1.0 : 0.0
+            });
+        });
+
+        const submission = {
+            role,
+            entity_id: entityId,
+            entity_name: entityName,
+            preferences: { entity_id:entityId, entity_type:role, weights }
+        };
+
+        // Role-specific data
+        if (role === 'teacher') {
+            submission.courses = teacherCourses.filter(c => c.selected).map(c => ({
+                course_id: c.course_id, name: c.name, lectures_per_week: c.lectures_per_week
+            }));
+        } else if (role === 'student_group') {
+            submission.group_size = parseInt(document.getElementById('group-size')?.value) || 30;
+            submission.max_events_per_day = parseInt(document.getElementById('group-max-events')?.value) || 5;
+            submission.courses = groupCourses.filter(c => c.selected).map(c => ({
+                course_id: c.course_id, name: c.name
+            }));
+        } else if (role === 'room') {
+            submission.capacity = parseInt(document.getElementById('room-capacity').value) || 40;
+            submission.room_type = document.getElementById('room-type').value;
+            submission.equipment = [...equipment];
+        }
+
+        try {
+            const resp = await fetch('/api/v1/submissions', {
+                method: 'POST',
+                headers: {'Content-Type':'application/json'},
+                body: JSON.stringify(submission)
+            });
+            if (!resp.ok) throw new Error('Server error');
+            const result = await resp.json();
+
+            document.getElementById('step-prefs').classList.add('hidden');
+            const banner = document.getElementById('success-banner');
+            banner.textContent = `Submitted successfully! (ID: ${result.id}) The admin can now include your preferences when generating the timetable.`;
+            banner.classList.add('visible');
+
+            // Reset for next submission
+            tsPrefs = {};
+            teacherCourses = [];
+            groupCourses = [];
+            equipment = [];
+        } catch(e) {
+            showPortalError('Failed to submit: ' + e.message);
+        }
+    });
+
+    // ── Load existing courses from admin data for selection ──────────────────
+    async function loadExistingCourses() {
+        // Try to load from admin's localStorage data (same origin)
+        try {
+            const saved = localStorage.getItem('timetable_state');
+            if (saved) {
+                const {inputData} = JSON.parse(saved);
+                if (inputData?.courses) {
+                    const courses = inputData.courses.map(c => ({course_id:c.course_id, name:c.name, lectures_per_week:3, selected:false}));
+                    teacherCourses = [...courses];
+                    groupCourses = courses.map(c => ({...c}));
+                    renderTeacherCourses();
+                    renderGroupCourses();
+                }
+            }
+        } catch(_) {}
+    }
+    loadExistingCourses();
+
+    function showPortalError(msg) { const el = document.getElementById('portal-error'); el.textContent = msg; el.classList.add('visible'); }
+    function hidePortalError() { document.getElementById('portal-error').classList.remove('visible'); }
+    </script>
+</body>
+</html>
