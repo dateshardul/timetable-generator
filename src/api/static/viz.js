@@ -401,29 +401,89 @@ function validateInput(data) {
 
 // ─── Load / Clear / Generate ────────────────────────────────────────────────
 function loadSampleData() {
+    // 8 teachers across CS, Math, Physics departments
     formData.teachers = [
-        {teacher_id:"T1",name:"Dr. Smith",max_hours_per_week:20},
-        {teacher_id:"T2",name:"Dr. Jones",max_hours_per_week:20},
-        {teacher_id:"T3",name:"Dr. Brown",max_hours_per_week:20}
+        {teacher_id:"T1",name:"Dr. Smith (CS)",max_hours_per_week:18},
+        {teacher_id:"T2",name:"Dr. Jones (CS)",max_hours_per_week:16},
+        {teacher_id:"T3",name:"Dr. Brown (Math)",max_hours_per_week:20},
+        {teacher_id:"T4",name:"Dr. Patel (Physics)",max_hours_per_week:18},
+        {teacher_id:"T5",name:"Dr. Chen (CS)",max_hours_per_week:14},
+        {teacher_id:"T6",name:"Dr. Wilson (Math)",max_hours_per_week:16},
+        {teacher_id:"T7",name:"Dr. Garcia (CS)",max_hours_per_week:18},
+        {teacher_id:"T8",name:"Prof. Lee (Physics)",max_hours_per_week:12},
     ];
-    formData.student_groups = [{group_id:"G1",name:"CS Year 1",size:40},{group_id:"G2",name:"CS Year 2",size:35}];
+
+    // 4 student groups with different sizes and overlapping enrollments
+    formData.student_groups = [
+        {group_id:"G1",name:"CS Year 1",size:45},
+        {group_id:"G2",name:"CS Year 2",size:38},
+        {group_id:"G3",name:"CS Year 3",size:30},
+        {group_id:"G4",name:"Math+Physics Joint",size:25},
+    ];
+
+    // 8 rooms: mix of lecture halls, seminar rooms, and labs
     formData.rooms = [
-        {room_id:"R1",name:"Room 101",capacity:50,room_type:"lecture"},
-        {room_id:"R2",name:"Room 102",capacity:45,room_type:"lecture"},
-        {room_id:"R3",name:"Room 103",capacity:60,room_type:"lecture"},
-        {room_id:"R4",name:"Lab A",capacity:30,room_type:"lab"}
+        {room_id:"R1",name:"Lecture Hall A",capacity:120,room_type:"lecture"},
+        {room_id:"R2",name:"Lecture Hall B",capacity:80,room_type:"lecture"},
+        {room_id:"R3",name:"Room 201",capacity:50,room_type:"lecture"},
+        {room_id:"R4",name:"Room 202",capacity:50,room_type:"lecture"},
+        {room_id:"R5",name:"Seminar Room",capacity:30,room_type:"lecture"},
+        {room_id:"R6",name:"CS Lab 1",capacity:35,room_type:"lab"},
+        {room_id:"R7",name:"CS Lab 2",capacity:35,room_type:"lab"},
+        {room_id:"R8",name:"Physics Lab",capacity:25,room_type:"lab"},
     ];
+
+    // 10 courses with prerequisites, labs, multi-section, shared groups
+    // This creates ~30 events (lectures) — enough for interesting conflicts
     formData.courses = [
-        {course_id:"CS101",name:"Intro to CS",sections:[{section_id:"CS101-A",course_id:"CS101",lectures_per_week:3,teacher_id:"T1",student_group_ids:["G1"],max_students:40}]},
-        {course_id:"CS201",name:"Data Structures",prerequisites:["CS101"],sections:[{section_id:"CS201-A",course_id:"CS201",lectures_per_week:2,teacher_id:"T1",student_group_ids:["G2"],max_students:35}]},
-        {course_id:"MATH101",name:"Calculus I",sections:[{section_id:"MATH101-A",course_id:"MATH101",lectures_per_week:3,teacher_id:"T2",student_group_ids:["G1","G2"],max_students:60}]},
-        {course_id:"PHY101",name:"Physics I",sections:[{section_id:"PHY101-A",course_id:"PHY101",lectures_per_week:2,teacher_id:"T3",student_group_ids:["G1"],max_students:40}]}
+        // Year 1 core — G1 takes all of these
+        {course_id:"CS101",name:"Intro to Programming",sections:[
+            {section_id:"CS101-A",course_id:"CS101",lectures_per_week:3,teacher_id:"T1",student_group_ids:["G1"],max_students:45},
+        ]},
+        {course_id:"CS102",name:"Programming Lab",sections:[
+            {section_id:"CS102-A",course_id:"CS102",lectures_per_week:2,teacher_id:"T2",student_group_ids:["G1"],max_students:35,section_type:"lab"},
+        ]},
+        {course_id:"MATH101",name:"Calculus I",sections:[
+            // Shared between CS Year 1 and Math+Physics — big conflict potential
+            {section_id:"MATH101-A",course_id:"MATH101",lectures_per_week:3,teacher_id:"T3",student_group_ids:["G1","G4"],max_students:70},
+        ]},
+        {course_id:"PHY101",name:"Physics I",sections:[
+            {section_id:"PHY101-A",course_id:"PHY101",lectures_per_week:2,teacher_id:"T4",student_group_ids:["G1","G4"],max_students:70},
+            {section_id:"PHY101-L",course_id:"PHY101",lectures_per_week:1,teacher_id:"T8",student_group_ids:["G4"],max_students:25,section_type:"lab"},
+        ]},
+
+        // Year 2 — G2 takes these, prerequisites from Year 1
+        {course_id:"CS201",name:"Data Structures",prerequisites:["CS101"],sections:[
+            {section_id:"CS201-A",course_id:"CS201",lectures_per_week:3,teacher_id:"T1",student_group_ids:["G2"],max_students:38},
+        ]},
+        {course_id:"CS202",name:"Algorithms Lab",prerequisites:["CS101"],sections:[
+            {section_id:"CS202-A",course_id:"CS202",lectures_per_week:2,teacher_id:"T5",student_group_ids:["G2"],max_students:35,section_type:"lab"},
+        ]},
+        {course_id:"MATH201",name:"Linear Algebra",prerequisites:["MATH101"],sections:[
+            // Shared between CS Year 2 and Math+Physics joint
+            {section_id:"MATH201-A",course_id:"MATH201",lectures_per_week:3,teacher_id:"T6",student_group_ids:["G2","G4"],max_students:63},
+        ]},
+
+        // Year 3 — G3 takes these, advanced courses
+        {course_id:"CS301",name:"Operating Systems",prerequisites:["CS201"],sections:[
+            {section_id:"CS301-A",course_id:"CS301",lectures_per_week:2,teacher_id:"T7",student_group_ids:["G3"],max_students:30},
+        ]},
+        {course_id:"CS302",name:"Machine Learning",prerequisites:["CS201","MATH201"],sections:[
+            // T5 teaches this AND the Year 2 lab — creates teacher conflicts
+            {section_id:"CS302-A",course_id:"CS302",lectures_per_week:2,teacher_id:"T5",student_group_ids:["G3"],max_students:30},
+        ]},
+        {course_id:"CS303",name:"Database Systems",prerequisites:["CS201"],sections:[
+            // T1 teaches this AND Year 1 + Year 2 CS — heavy teacher load
+            {section_id:"CS303-A",course_id:"CS303",lectures_per_week:2,teacher_id:"T1",student_group_ids:["G3"],max_students:30},
+        ]},
     ];
+
+    // Weekdays 8 AM - 4 PM (8 periods x 5 days = 40 slots for ~30 events)
     formData.timeslots.clear();
-    HOURS.forEach((h,pi) => { if (h.hour>=9 && h.hour<=15) DAYS.slice(0,5).forEach(d => formData.timeslots.add(`${d}-${pi+1}`)); });
-    idCounters = {teacher:4,group:3,room:5,course:5,section:5};
+    HOURS.forEach((h,pi) => { if (h.hour>=8 && h.hour<=15) DAYS.slice(0,5).forEach(d => formData.timeslots.add(`${d}-${pi+1}`)); });
+
+    idCounters = {teacher:9,group:5,room:9,course:10,section:12};
     renderAll();
-    // Also sync to JSON textarea
     document.getElementById('input-json').value = JSON.stringify(buildInputFromForm(), null, 2);
     hideError();
 }
@@ -441,7 +501,8 @@ document.getElementById('btn-clear-all').addEventListener('click', () => {
     // Clear viz tabs
     document.getElementById('graph-svg').style.display = 'none';
     document.getElementById('graph-empty').style.display = '';
-    document.getElementById('solver-svg').style.display = 'none';
+    document.getElementById('anim-grid-wrap').style.display = 'none';
+    document.getElementById('anim-grid-wrap').innerHTML = '';
     document.getElementById('solver-empty').style.display = '';
     document.getElementById('timetable-grid').innerHTML = '';
     document.getElementById('timetable-empty').style.display = '';
@@ -624,64 +685,191 @@ function renderGraph() {
         `<div class="metric"><span>Soft</span><span class="metric-value">${data.links.filter(l=>l.weight<1000).length}</span></div>`;
 }
 
-// ─── Solver View ────────────────────────────────────────────────────────────
+// ─── Solver Animation (timetable filling step-by-step) ─────────────────────
+let animState = { stepIdx:0, playing:false, timer:null, steps:[], eventInfo:{} };
+
 function renderSolverView() {
-    if (!state.graphData || !state.result) return;
+    if (!state.result || !state.inputData) return;
+    const steps = state.result.steps || [];
+    if (!steps.length) return;
+
     document.getElementById('solver-empty').style.display = 'none';
-    const svgEl = document.getElementById('solver-svg');
-    svgEl.style.display = 'block';
-    const svg = d3.select(svgEl);
-    svg.selectAll('*').remove();
+    document.getElementById('anim-grid-wrap').style.display = '';
 
-    const rect = svgEl.getBoundingClientRect();
-    const width = Math.max(rect.width, 300);
-    const height = Math.max(rect.height, 300);
-    svg.attr('viewBox', `0 0 ${width} ${height}`);
+    const input = state.inputData;
+    const courseMap = {}; input.courses.forEach(c=>{courseMap[c.course_id]=c;});
+    const days = [...new Set(input.timeslots.map(t=>t.day))];
+    const periods = [...new Set(input.timeslots.map(t=>t.period))].sort((a,b)=>a-b);
 
-    const tsList = [...new Set(state.result.assignments.map(a=>a.timeslot))].sort();
-    const tsColor = d3.scaleOrdinal().domain(tsList).range(COLORS);
-    const data = state.graphData;
+    // Build event info lookup
+    const eventInfo = {};
+    input.sections.forEach(sec=>{for(let i=0;i<sec.lectures_per_week;i++){
+        const eid = sec.section_id+'_L'+i;
+        eventInfo[eid] = {course_name:courseMap[sec.course_id]?.name||sec.course_id, course_id:sec.course_id, section_id:sec.section_id, teacher_id:sec.teacher_id};
+    }});
 
-    const sim = d3.forceSimulation(data.nodes)
-        .force('link',d3.forceLink(data.links).id(d=>d.id).distance(80))
-        .force('charge',d3.forceManyBody().strength(-250))
-        .force('center',d3.forceCenter(width/2,height/2));
+    const cNames = [...new Set(Object.values(eventInfo).map(e=>e.course_name))];
+    const colorScale = d3.scaleOrdinal().domain(cNames).range(COLORS);
 
-    const link = svg.append('g').selectAll('line').data(data.links).join('line')
-        .attr('stroke','#484f58').attr('stroke-width',1).attr('stroke-opacity',0.4);
-    const node = svg.append('g').selectAll('circle').data(data.nodes).join('circle')
-        .attr('r',12).attr('fill',d=>d.timeslot?tsColor(d.timeslot):'#484f58')
-        .attr('stroke','#0f1419').attr('stroke-width',2);
-    const label = svg.append('g').selectAll('text').data(data.nodes).join('text')
-        .text(d=>(d.course_name||'').split(' ')[0]).attr('font-size',9).attr('fill','#e7e9ea').attr('text-anchor','middle').attr('dy',3)
-        .style('pointer-events','none');
-
-    sim.on('tick',()=>{
-        const p=30;
-        data.nodes.forEach(d=>{d.x=Math.max(p,Math.min(width-p,d.x));d.y=Math.max(p,Math.min(height-p,d.y));});
-        link.attr('x1',d=>d.source.x).attr('y1',d=>d.source.y).attr('x2',d=>d.target.x).attr('y2',d=>d.target.y);
-        node.attr('cx',d=>d.x).attr('cy',d=>d.y);
-        label.attr('x',d=>d.x).attr('y',d=>d.y);
+    // Build empty grid HTML
+    let html = '<table class="timetable"><thead><tr><th>Period</th>';
+    days.forEach(d=>{html+=`<th>${d}</th>`;});
+    html += '</tr></thead><tbody>';
+    periods.forEach(p=>{
+        html+=`<tr><th>P${p}<br><small>${HOURS[p-1]?.hour||(7+p)}:00</small></th>`;
+        days.forEach(d=>{html+=`<td id="anim-cell-${d}-${p}"></td>`;});
+        html+='</tr>';
     });
+    html+='</tbody></table>';
+    document.getElementById('anim-grid-wrap').innerHTML = html;
 
-    link.attr('stroke',l=>{
-        if(l.weight>=1000){const s=data.nodes.find(n=>n.id===(l.source.id||l.source)),t=data.nodes.find(n=>n.id===(l.target.id||l.target));
-            if(s&&t&&s.timeslot===t.timeslot)return '#f85149';}return '#484f58';});
+    // Store animation state
+    animState.steps = steps;
+    animState.eventInfo = eventInfo;
+    animState.colorScale = colorScale;
+    animState.days = days;
+    animState.periods = periods;
+    animState.stepIdx = 0;
+    animState.playing = false;
+    if (animState.timer) { clearInterval(animState.timer); animState.timer = null; }
 
-    document.getElementById('solver-legend').innerHTML = tsList.map(ts=>
-        `<div class="legend-item"><div class="legend-dot" style="background:${tsColor(ts)}"></div>${ts}</div>`).join('');
+    // Update totals
+    const totalEvents = Object.keys(eventInfo).length;
+    document.getElementById('anim-step-total').textContent = steps.length;
+    document.getElementById('anim-total-events').textContent = totalEvents;
+    document.getElementById('anim-log').innerHTML = '';
 
-    const m = state.result?.metrics||{};
-    document.getElementById('solver-metrics').innerHTML =
-        `<div class="metric"><span>Social Welfare</span><span class="metric-value">${m.social_welfare??'—'}</span></div>`+
-        `<div class="metric"><span>Fairness</span><span class="metric-value">${m.fairness_index??'—'}</span></div>`+
-        `<div class="metric"><span>Hard Conflicts</span><span class="metric-value" style="color:${m.hard_conflicts>0?'#f85149':'#3fb950'}">${m.hard_conflicts??'—'}</span></div>`+
-        `<div class="metric"><span>Soft Conflicts</span><span class="metric-value">${m.soft_conflicts??'—'}</span></div>`+
-        `<div class="metric"><span>Room Util.</span><span class="metric-value">${m.room_utilization?(m.room_utilization*100).toFixed(0)+'%':'—'}</span></div>`+
-        `<div class="metric"><span>Pref Sat.</span><span class="metric-value">${m.preference_satisfaction?(m.preference_satisfaction*100).toFixed(0)+'%':'—'}</span></div>`+
-        `<div class="metric"><span>Iterations</span><span class="metric-value">${state.result?.iterations??'—'}</span></div>`+
-        `<div class="metric"><span>Converged</span><span class="metric-value" style="color:${state.result?.converged?'#3fb950':'#f85149'}">${state.result?.converged?'Yes':'No'}</span></div>`;
+    updateAnimScoreboard(0, 0, new Set(), '—');
 }
+
+function parseTimeslotStr(tsStr) {
+    // "Monday P1 (09:00)" -> {day:"Monday", period:1}
+    const dayMatch = DAYS.find(d => tsStr.includes(d));
+    const pMatch = tsStr.match(/P(\d+)/);
+    if (dayMatch && pMatch) return {day:dayMatch, period:parseInt(pMatch[1])};
+    return null;
+}
+
+function animStep() {
+    if (animState.stepIdx >= animState.steps.length) {
+        animPause();
+        document.getElementById('anim-narration').innerHTML =
+            '<span style="color:#3fb950;">&#10003; Solver finished! Timetable complete.</span>';
+        return;
+    }
+
+    const step = animState.steps[animState.stepIdx];
+    const info = animState.eventInfo[step.event_id] || {};
+    const bg = animState.colorScale(info.course_name || '');
+    const ts = parseTimeslotStr(step.timeslot);
+
+    // If this is a move (best_response), remove from old slot first
+    if (step.old_timeslot) {
+        const oldTs = parseTimeslotStr(step.old_timeslot);
+        if (oldTs) {
+            const oldCell = document.getElementById(`anim-cell-${oldTs.day}-${oldTs.period}`);
+            if (oldCell) {
+                const oldEl = oldCell.querySelector(`[data-eid="${step.event_id}"]`);
+                if (oldEl) {
+                    oldEl.classList.add('anim-old-slot');
+                    setTimeout(() => oldEl.remove(), 300);
+                }
+            }
+        }
+    }
+
+    // Remove "latest" highlight from all cells
+    document.querySelectorAll('.anim-latest').forEach(el => el.classList.remove('anim-latest'));
+
+    // Place into new slot
+    if (ts) {
+        const cell = document.getElementById(`anim-cell-${ts.day}-${ts.period}`);
+        if (cell) {
+            const div = document.createElement('div');
+            div.className = `cell-event ${step.phase==='greedy'?'anim-placed':'anim-moved'} anim-latest`;
+            div.dataset.eid = step.event_id;
+            div.style.cssText = `background:${bg}33;border-left:3px solid ${bg};`;
+            div.innerHTML = `<div class="course">${info.course_name||step.event_id}</div><div class="details">${info.teacher_id||''}</div>`;
+            cell.appendChild(div);
+        }
+    }
+
+    // Track placed events
+    const placedSet = new Set();
+    for (let i = 0; i <= animState.stepIdx; i++) {
+        placedSet.add(animState.steps[i].event_id);
+    }
+
+    // Update scoreboard
+    const phaseLabel = step.phase === 'greedy' ? 'Greedy Placement' : 'Best Response';
+    updateAnimScoreboard(animState.stepIdx + 1, step.conflicts_after, placedSet, phaseLabel);
+
+    // Narration
+    const courseName = info.course_name || step.event_id;
+    let narr = '';
+    if (step.phase === 'greedy') {
+        narr = `<span style="color:#58a6ff;">&#9654;</span> Placing <strong>${courseName}</strong> at ${step.timeslot}`;
+        if (step.conflicts_after > 0) narr += ` <span style="color:#f85149;">(${step.conflicts_after} conflict${step.conflicts_after>1?'s':''})</span>`;
+        else narr += ' <span style="color:#3fb950;">(no conflicts)</span>';
+    } else {
+        narr = `<span style="color:#3fb950;">&#8634;</span> Moving <strong>${courseName}</strong> from ${step.old_timeslot} &rarr; ${step.timeslot}`;
+        const delta = step.conflicts_before - step.conflicts_after;
+        if (delta > 0) narr += ` <span style="color:#3fb950;">(-${delta} conflict${delta>1?'s':''}!)</span>`;
+    }
+    narr += `<div style="font-size:11px;color:#484f58;margin-top:2px;">${step.reason}</div>`;
+    document.getElementById('anim-narration').innerHTML = narr;
+
+    // Log entry
+    const logEntry = document.createElement('div');
+    logEntry.className = `anim-log-entry ${step.phase}`;
+    logEntry.innerHTML = `<strong>${courseName}</strong> &rarr; ${step.timeslot.replace(/\(.*\)/,'')} ${step.conflicts_after>0?'<span style="color:#f85149;">('+step.conflicts_after+' conflicts)</span>':'<span style="color:#3fb950;">&#10003;</span>'}`;
+    const log = document.getElementById('anim-log');
+    log.prepend(logEntry);
+
+    animState.stepIdx++;
+}
+
+function updateAnimScoreboard(stepNum, conflicts, placedSet, phase) {
+    document.getElementById('anim-step-num').textContent = stepNum;
+    document.getElementById('anim-phase').textContent = phase;
+    document.getElementById('anim-conflicts').textContent = conflicts;
+    document.getElementById('anim-conflicts').style.color = conflicts > 0 ? '#f85149' : '#3fb950';
+    document.getElementById('anim-placed').textContent = placedSet.size;
+    const total = animState.steps.length;
+    document.getElementById('anim-progress').style.width = total > 0 ? (stepNum / total * 100) + '%' : '0%';
+}
+
+function animPlay() {
+    if (animState.playing) return;
+    animState.playing = true;
+    const speedEl = document.getElementById('anim-speed');
+    const getDelay = () => 1100 - (parseInt(speedEl.value) * 100); // 100ms to 1000ms
+    (function tick() {
+        if (!animState.playing || animState.stepIdx >= animState.steps.length) { animPause(); return; }
+        animStep();
+        animState.timer = setTimeout(tick, getDelay());
+    })();
+}
+
+function animPause() {
+    animState.playing = false;
+    if (animState.timer) { clearTimeout(animState.timer); animState.timer = null; }
+}
+
+function animReset() {
+    animPause();
+    animState.stepIdx = 0;
+    // Clear all animated cells
+    document.querySelectorAll('#anim-grid-wrap td').forEach(td => { td.innerHTML = ''; });
+    document.getElementById('anim-log').innerHTML = '';
+    document.getElementById('anim-narration').textContent = 'Click Play to watch the solver fill the timetable step by step.';
+    updateAnimScoreboard(0, 0, new Set(), '—');
+}
+
+document.getElementById('btn-play').addEventListener('click', animPlay);
+document.getElementById('btn-pause').addEventListener('click', animPause);
+document.getElementById('btn-step').addEventListener('click', () => { animPause(); animStep(); });
+document.getElementById('btn-reset').addEventListener('click', animReset);
 
 // ─── Timetable Grid ─────────────────────────────────────────────────────────
 function renderTimetableGrid(filterType, filterValue) {
@@ -791,7 +979,7 @@ const tabObserver = new MutationObserver(() => {
         }
     }
     if (state.result && document.getElementById('tab-solver').classList.contains('active')) {
-        if (document.getElementById('solver-svg').style.display === 'none' || !document.getElementById('solver-svg').hasChildNodes()) {
+        if (document.getElementById('anim-grid-wrap').style.display === 'none' || !document.getElementById('anim-grid-wrap').hasChildNodes()) {
             renderSolverView();
         }
     }

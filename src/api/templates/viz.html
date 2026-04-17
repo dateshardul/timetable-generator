@@ -127,6 +127,19 @@
         .top-bar-left { display: flex; align-items: center; gap: 12px; }
         .top-bar-right { display: flex; gap: 6px; flex-wrap: wrap; }
 
+        /* Solver animation */
+        @keyframes cell-pop { 0%{transform:scale(0.5);opacity:0;} 60%{transform:scale(1.08);} 100%{transform:scale(1);opacity:1;} }
+        @keyframes cell-flash { 0%{box-shadow:0 0 0 0 #f8514966;} 50%{box-shadow:0 0 12px 4px #f8514966;} 100%{box-shadow:0 0 0 0 transparent;} }
+        @keyframes cell-move { 0%{opacity:0.3;transform:translateY(-8px);} 100%{opacity:1;transform:translateY(0);} }
+        .anim-placed { animation: cell-pop 0.35s ease-out; }
+        .anim-moved { animation: cell-move 0.3s ease-out; }
+        .anim-conflict { animation: cell-flash 0.6s ease-out; }
+        .anim-latest { box-shadow: 0 0 8px 2px #58a6ff88; }
+        .anim-old-slot { background: #f8514933 !important; border-left-color: #f85149 !important; }
+        .anim-log-entry { padding: 4px 8px; border-left: 3px solid #30363d; margin-bottom: 4px; }
+        .anim-log-entry.greedy { border-left-color: #58a6ff; }
+        .anim-log-entry.best_response { border-left-color: #3fb950; }
+
         /* Submissions tab */
         .sub-card { background:#161b22; border:1px solid #30363d; border-radius:6px; padding:12px; margin-bottom:8px; }
         .sub-card .sub-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:6px; }
@@ -287,23 +300,43 @@
 
     <!-- SOLVER TAB -->
     <div class="tab-content" id="tab-solver">
-        <div class="panel" id="solver-container">
-            <h3>Solver Animation</h3>
+        <div class="panel" id="solver-container" style="display:flex;flex-direction:column;">
+            <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:10px;flex-shrink:0;">
+                <h3 style="margin-bottom:0;">Solver Animation</h3>
+                <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                    <button class="btn" id="btn-reset">&#9198; Reset</button>
+                    <button class="btn" id="btn-step">&#9654;&#124; Step</button>
+                    <button class="btn" id="btn-play">&#9654; Play</button>
+                    <button class="btn" id="btn-pause">&#9646;&#9646; Pause</button>
+                    <label style="font-size:12px;color:#8b949e;display:flex;align-items:center;gap:4px;">
+                        Speed
+                        <input type="range" id="anim-speed" min="1" max="10" value="5" style="width:80px;accent-color:#58a6ff;">
+                    </label>
+                </div>
+            </div>
+            <!-- Progress bar -->
+            <div style="height:6px;background:#21262d;border-radius:3px;margin-bottom:8px;flex-shrink:0;overflow:hidden;">
+                <div id="anim-progress" style="height:100%;background:#58a6ff;border-radius:3px;width:0%;transition:width 0.2s;"></div>
+            </div>
+            <!-- Score panel -->
+            <div id="anim-scoreboard" style="display:flex;gap:16px;padding:8px 12px;background:#161b22;border-radius:6px;margin-bottom:10px;flex-shrink:0;flex-wrap:wrap;font-size:13px;">
+                <span>Step <strong id="anim-step-num">0</strong> / <span id="anim-step-total">0</span></span>
+                <span>Phase: <strong id="anim-phase">—</strong></span>
+                <span>Conflicts: <strong id="anim-conflicts" style="color:#3fb950;">0</strong></span>
+                <span>Placed: <strong id="anim-placed">0</strong> / <span id="anim-total-events">0</span></span>
+            </div>
+            <!-- Narration -->
+            <div id="anim-narration" style="padding:8px 12px;background:#0d1117;border:1px solid #30363d;border-radius:6px;margin-bottom:10px;font-size:13px;color:#8b949e;min-height:36px;flex-shrink:0;">
+                Click Play to watch the solver fill the timetable step by step.
+            </div>
+            <!-- Empty state -->
             <div class="empty-state" id="solver-empty"><div class="empty-icon">&#9654;</div><p>Generate a timetable first to see the solver animation.</p></div>
-            <svg id="solver-svg" style="display:none;"></svg>
+            <!-- Animated timetable grid -->
+            <div id="anim-grid-wrap" style="flex:1;overflow:auto;display:none;"></div>
         </div>
         <div class="panel" id="solver-controls">
-            <h3>Controls</h3>
-            <div style="margin-bottom: 14px; display: flex; flex-wrap: wrap; gap: 4px;">
-                <button class="btn" id="btn-step">Step</button>
-                <button class="btn" id="btn-play">Play</button>
-                <button class="btn" id="btn-pause">Pause</button>
-                <button class="btn" id="btn-reset">Reset</button>
-            </div>
-            <h3>Metrics</h3>
-            <div id="solver-metrics"></div>
-            <h3 style="margin-top: 14px;">Timeslot Legend</h3>
-            <div class="legend" id="solver-legend"></div>
+            <h3>Event Log</h3>
+            <div id="anim-log" style="font-size:12px;max-height:100%;overflow-y:auto;"></div>
         </div>
     </div>
 

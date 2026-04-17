@@ -18,6 +18,19 @@ class Assignment:
 
 
 @dataclass
+class SolverStep:
+    """One step of the solver — an event being placed or moved."""
+
+    event_id: str
+    timeslot: str          # string representation of assigned timeslot
+    phase: str             # "greedy" or "best_response"
+    old_timeslot: Optional[str] = None  # None for initial placement
+    conflicts_before: int = 0
+    conflicts_after: int = 0
+    reason: str = ""
+
+
+@dataclass
 class Timetable:
     """Complete timetable output with assignments and metadata."""
 
@@ -26,6 +39,7 @@ class Timetable:
     converged: bool = False
     iterations: int = 0
     solver: str = "classical"
+    steps: list[SolverStep] = field(default_factory=list)
 
     def get_assignment(self, event_id: str) -> Optional[Assignment]:
         for a in self.assignments:
@@ -47,4 +61,16 @@ class Timetable:
             "converged": self.converged,
             "iterations": self.iterations,
             "solver": self.solver,
+            "steps": [
+                {
+                    "event_id": s.event_id,
+                    "timeslot": s.timeslot,
+                    "phase": s.phase,
+                    "old_timeslot": s.old_timeslot,
+                    "conflicts_before": s.conflicts_before,
+                    "conflicts_after": s.conflicts_after,
+                    "reason": s.reason,
+                }
+                for s in self.steps
+            ],
         }

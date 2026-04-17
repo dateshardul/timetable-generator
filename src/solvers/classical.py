@@ -18,7 +18,7 @@ from src.models.event import Event
 from src.models.preferences import StakeholderPreferences
 from src.models.room import Room
 from src.models.timeslot import TimeSlot
-from src.models.timetable import Assignment, Timetable
+from src.models.timetable import Assignment, SolverStep, Timetable
 
 from .base import SolverBackend
 
@@ -69,6 +69,18 @@ class ClassicalSolver(SolverBackend):
 
         # Current assignment: event_id -> TimeSlot
         assignment: dict[str, TimeSlot] = {}
+        steps: list[SolverStep] = []
+
+        def count_conflicts(a: dict[str, TimeSlot]) -> int:
+            """Count hard conflicts in current assignment."""
+            c = 0
+            for eid in a:
+                if eid not in graph:
+                    continue
+                for nb in graph.neighbors(eid):
+                    if a.get(nb) == a[eid] and graph.edges[eid, nb].get("weight", 0) >= 1000:
+                        c += 1
+            return c // 2  # each conflict counted twice
 
         # Phase A: Greedy initial assignment (Welsh-Powell)
         ordered = sorted(
@@ -79,6 +91,7 @@ class ClassicalSolver(SolverBackend):
         for event in ordered:
             if event.event_id in frozen_events and event.event_id in assignment:
                 continue
+            conflicts_before = count_conflicts(assignment)
             best_slot = None
             best_payoff = float("-inf")
             for ts in timeslots:
@@ -88,6 +101,15 @@ class ClassicalSolver(SolverBackend):
                     best_slot = ts
             if best_slot is not None:
                 assignment[event.event_id] = best_slot
+                conflicts_after = count_conflicts(assignment)
+                steps.append(SolverStep(
+                    event_id=event.event_id,
+                    timeslot=str(best_slot),
+                    phase="greedy",
+                    conflicts_before=conflicts_before,
+                    conflicts_after=conflicts_after,
+                    reason=f"Most constrained ({graph.degree(event.event_id) if event.event_id in graph else 0} edges), best payoff slot",
+                ))
 
         # Phase B: Iterative best-response dynamics
         converged = False
@@ -117,8 +139,26 @@ class ClassicalSolver(SolverBackend):
                         best_ts = ts
 
                 if best_ts != current_ts:
+                    old_ts_str = str(current_ts) if current_ts else None
+                    conflicts_before = count_conflicts(assignment)
                     assignment[event.event_id] = best_ts
+                    conflicts_after = count_conflicts(assignment)
                     improved = True
+                    delta = conflicts_before - conflicts_after
+                    reason = f"Iter {iterations}: moved for better payoff"
+                    if delta > 0:
+                        reason += f", resolved {delta} conflict{'s' if delta > 1 else ''}"
+                    elif delta < 0:
+                        reason += f", trade-off (+{-delta} conflicts for better preference)"
+                    steps.append(SolverStep(
+                        event_id=event.event_id,
+                        timeslot=str(best_ts),
+                        phase="best_response",
+                        old_timeslot=old_ts_str,
+                        conflicts_before=conflicts_before,
+                        conflicts_after=conflicts_after,
+                        reason=reason,
+                    ))
 
             if not improved:
                 converged = True
@@ -141,6 +181,7 @@ class ClassicalSolver(SolverBackend):
             converged=converged,
             iterations=iterations,
             solver=self.name,
+            steps=steps,
         )
 
     def _payoff(
