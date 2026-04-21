@@ -56,7 +56,15 @@ def create_app(solver_name: str = "classical") -> Flask:
         if not input_data:
             return jsonify({"error": "No JSON body provided"}), 400
         try:
-            result = orchestrator.generate(input_data)
+            # Demo mode: add randomness to greedy phase to show conflict resolution
+            demo = request.args.get("demo", "").lower() in ("1", "true", "yes")
+            if demo:
+                demo_orchestrator = Orchestrator(
+                    solver=ClassicalSolver(seed=42, greedy_randomness=0.6)
+                )
+                result = demo_orchestrator.generate(input_data)
+            else:
+                result = orchestrator.generate(input_data)
             return jsonify(result)
         except Exception as e:
             return jsonify({"error": str(e)}), 500

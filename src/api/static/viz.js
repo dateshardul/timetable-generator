@@ -421,16 +421,14 @@ function loadSampleData() {
         {group_id:"G4",name:"Math+Physics Joint",size:25},
     ];
 
-    // 8 rooms: mix of lecture halls, seminar rooms, and labs
+    // 6 rooms — tight enough that room assignment matters
     formData.rooms = [
         {room_id:"R1",name:"Lecture Hall A",capacity:120,room_type:"lecture"},
         {room_id:"R2",name:"Lecture Hall B",capacity:80,room_type:"lecture"},
         {room_id:"R3",name:"Room 201",capacity:50,room_type:"lecture"},
         {room_id:"R4",name:"Room 202",capacity:50,room_type:"lecture"},
         {room_id:"R5",name:"Seminar Room",capacity:30,room_type:"lecture"},
-        {room_id:"R6",name:"CS Lab 1",capacity:35,room_type:"lab"},
-        {room_id:"R7",name:"CS Lab 2",capacity:35,room_type:"lab"},
-        {room_id:"R8",name:"Physics Lab",capacity:25,room_type:"lab"},
+        {room_id:"R6",name:"CS Lab",capacity:35,room_type:"lab"},
     ];
 
     // 10 courses with prerequisites, labs, multi-section, shared groups
@@ -478,11 +476,14 @@ function loadSampleData() {
         ]},
     ];
 
-    // Weekdays 8 AM - 4 PM (8 periods x 5 days = 40 slots for ~30 events)
+    // TIGHT schedule: 4 days x 4 periods = 16 slots for 25 events
+    // This creates initial conflicts that the solver resolves — great for demo
     formData.timeslots.clear();
-    HOURS.forEach((h,pi) => { if (h.hour>=8 && h.hour<=15) DAYS.slice(0,5).forEach(d => formData.timeslots.add(`${d}-${pi+1}`)); });
+    ['Monday','Tuesday','Wednesday','Thursday'].forEach(d => {
+        [2,3,4,5].forEach(pi => formData.timeslots.add(`${d}-${pi}`)); // 9 AM - 12 PM
+    });
 
-    idCounters = {teacher:9,group:5,room:9,course:10,section:12};
+    idCounters = {teacher:9,group:5,room:7,course:11,section:12};
     renderAll();
     document.getElementById('input-json').value = JSON.stringify(buildInputFromForm(), null, 2);
     hideError();
@@ -529,7 +530,9 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
     document.getElementById('status').textContent = 'Generating...';
 
     try {
-        const resp = await fetch('/api/v1/generate', {
+        const demoMode = document.getElementById('demo-mode')?.checked;
+        const url = '/api/v1/generate' + (demoMode ? '?demo=1' : '');
+        const resp = await fetch(url, {
             method:'POST', headers:{'Content-Type':'application/json'},
             body: JSON.stringify(inputData)
         });

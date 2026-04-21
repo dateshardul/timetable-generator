@@ -38,9 +38,13 @@ class ClassicalSolver(SolverBackend):
         transition_matrix: TransitionMatrix | None = None,
         disruption_costs: list[DisruptionCost] | None = None,
         prior_assignments: dict[str, tuple[TimeSlot, str | None]] | None = None,
+        greedy_randomness: float = 0.0,
     ):
         self.max_iterations = max_iterations
         self.seed = seed
+        # greedy_randomness in [0,1]: 0 = optimal greedy, 1 = fully random initial assignment
+        # Use >0 for demo mode to create initial conflicts that best-response resolves
+        self.greedy_randomness = greedy_randomness
         self.transition_matrix = transition_matrix or TransitionMatrix()
         self.disruption_map = {d.event_id: d for d in (disruption_costs or [])}
         # prior_assignments: event_id -> (old_timeslot, old_room_id) for disruption calc
@@ -82,7 +86,7 @@ class ClassicalSolver(SolverBackend):
                         c += 1
             return c // 2  # each conflict counted twice
 
-        # Phase A: Greedy initial assignment (Welsh-Powell)
+        # Phase A: Greedy initial assignment (Welsh-Powell, with optional randomness)
         ordered = sorted(
             events,
             key=lambda e: graph.degree(e.event_id) if e.event_id in graph else 0,
@@ -92,13 +96,21 @@ class ClassicalSolver(SolverBackend):
             if event.event_id in frozen_events and event.event_id in assignment:
                 continue
             conflicts_before = count_conflicts(assignment)
-            best_slot = None
-            best_payoff = float("-inf")
-            for ts in timeslots:
-                p = self._payoff(event, ts, assignment, graph, pref_map, section_events)
-                if p > best_payoff:
-                    best_payoff = p
-                    best_slot = ts
+
+            # With greedy_randomness > 0, sometimes pick a random slot instead of optimal
+            if self.greedy_randomness > 0 and rng.random() < self.greedy_randomness:
+                best_slot = rng.choice(timeslots)
+                reason = "Random initial placement (demo mode)"
+            else:
+                best_slot = None
+                best_payoff = float("-inf")
+                for ts in timeslots:
+                    p = self._payoff(event, ts, assignment, graph, pref_map, section_events)
+                    if p > best_payoff:
+                        best_payoff = p
+                        best_slot = ts
+                reason = f"Most constrained ({graph.degree(event.event_id) if event.event_id in graph else 0} edges), best payoff slot"
+
             if best_slot is not None:
                 assignment[event.event_id] = best_slot
                 conflicts_after = count_conflicts(assignment)
@@ -108,7 +120,7 @@ class ClassicalSolver(SolverBackend):
                     phase="greedy",
                     conflicts_before=conflicts_before,
                     conflicts_after=conflicts_after,
-                    reason=f"Most constrained ({graph.degree(event.event_id) if event.event_id in graph else 0} edges), best payoff slot",
+                    reason=reason,
                 ))
 
         # Phase B: Iterative best-response dynamics
