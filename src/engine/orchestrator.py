@@ -126,10 +126,18 @@ class Orchestrator:
                 weight_val = w_copy.pop("weight")
                 ts = TimeSlot(day=day, **w_copy)
                 weights[ts] = weight_val
+            # Parse additional preference dimensions
+            room_weights = {rw["room_id"]: rw["weight"] for rw in p.get("room_weights", [])}
+            teacher_weights = {tw["teacher_id"]: tw["weight"] for tw in p.get("teacher_weights", [])}
+            course_weights = {cw["course_id"]: cw["weight"] for cw in p.get("course_weights", [])}
+
             preferences.append(StakeholderPreferences(
                 entity_id=p["entity_id"],
                 entity_type=p["entity_type"],
                 weights=weights,
+                room_weights=room_weights,
+                teacher_weights=teacher_weights,
+                course_weights=course_weights,
             ))
 
         return courses, sections, teachers, student_groups, rooms, timeslots, preferences

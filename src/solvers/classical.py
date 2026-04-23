@@ -176,8 +176,8 @@ class ClassicalSolver(SolverBackend):
                 converged = True
                 break
 
-        # Phase C: Room assignment (greedy best-fit decreasing)
-        room_assignments = self._assign_rooms(assignment, event_map, rooms)
+        # Phase C: Room assignment (preference-aware)
+        room_assignments = self._assign_rooms(assignment, event_map, rooms, pref_map)
 
         # Phase D: Game-theoretic verification
         game_analysis = self._analyze_game(
@@ -268,17 +268,37 @@ class ClassicalSolver(SolverBackend):
 
         room_assignments = room_assignments or {}
 
-        # Preference reward: teacher pref + avg student group pref
+        # ── Preference reward (multi-dimensional) ──
+        # 1. Timeslot preference: teacher + avg student group
         teacher_pref = pref_map.get(event.teacher_id)
-        teacher_w = teacher_pref.get_weight(timeslot) if teacher_pref else 0.5
+        teacher_ts_w = teacher_pref.get_weight(timeslot) if teacher_pref else 0.5
 
-        group_weights = []
+        group_ts_weights = []
         for gid in event.student_group_ids:
             gp = pref_map.get(gid)
-            group_weights.append(gp.get_weight(timeslot) if gp else 0.5)
-        avg_group_w = sum(group_weights) / len(group_weights) if group_weights else 0.5
+            group_ts_weights.append(gp.get_weight(timeslot) if gp else 0.5)
+        avg_group_ts = sum(group_ts_weights) / len(group_ts_weights) if group_ts_weights else 0.5
 
-        preference_reward = (teacher_w + avg_group_w) / 2.0
+        timeslot_pref = (teacher_ts_w + avg_group_ts) / 2.0
+
+        # 2. Teacher-for-course preference: does this teacher want to teach this course?
+        course_pref = 0.5
+        if teacher_pref:
+            course_pref = teacher_pref.get_course_weight(event.course_id)
+
+        # 3. Student-for-teacher preference: do students prefer this teacher?
+        teacher_pref_from_students = []
+        for gid in event.student_group_ids:
+            gp = pref_map.get(gid)
+            if gp:
+                teacher_pref_from_students.append(gp.get_teacher_weight(event.teacher_id))
+        avg_teacher_pref = (
+            sum(teacher_pref_from_students) / len(teacher_pref_from_students)
+            if teacher_pref_from_students else 0.5
+        )
+
+        # Weighted combination: timeslot matters most (0.6), then teacher-student fit (0.25), then course fit (0.15)
+        preference_reward = 0.6 * timeslot_pref + 0.25 * avg_teacher_pref + 0.15 * course_pref
 
         # Conflict penalty: sum of edge weights for neighbors assigned to same timeslot
         conflict_penalty = 0.0
@@ -339,8 +359,17 @@ class ClassicalSolver(SolverBackend):
         assignment: dict[str, TimeSlot],
         event_map: dict[str, Event],
         rooms: list[Room],
+        pref_map: dict[str, StakeholderPreferences] | None = None,
     ) -> dict[str, str]:
-        """Phase C: assign rooms greedily by timeslot."""
+        """Phase C: assign rooms with preference-aware scoring.
+
+        For each timeslot, sort events by student count (best-fit decreasing).
+        For each event, score candidate rooms by:
+          - Capacity waste (lower = better)
+          - Teacher room preference (higher = better)
+          - Student group room preference (higher = better)
+        """
+        pref_map = pref_map or {}
         room_assignments: dict[str, str] = {}
 
         # Group events by timeslot
@@ -349,7 +378,6 @@ class ClassicalSolver(SolverBackend):
             slot_events[ts].append(eid)
 
         for ts, eids in slot_events.items():
-            # Sort by student count descending (best-fit decreasing)
             eids_sorted = sorted(
                 eids,
                 key=lambda eid: event_map[eid].student_count,
@@ -360,24 +388,40 @@ class ClassicalSolver(SolverBackend):
             for eid in eids_sorted:
                 event = event_map[eid]
                 best_room = None
-                best_waste = float("inf")
+                best_score = float("-inf")
 
                 for room in rooms:
                     if room.room_id in used_rooms:
                         continue
                     if room.capacity < event.student_count:
                         continue
-                    # Type matching
                     if event.event_type == "lab" and room.room_type != "lab":
                         continue
-                    # Equipment matching
                     if event.equipment and not all(
                         eq in room.equipment for eq in event.equipment
                     ):
                         continue
+
+                    # Score: combine capacity fit + room preferences
                     waste = room.capacity - event.student_count
-                    if waste < best_waste:
-                        best_waste = waste
+                    capacity_score = 1.0 / (1.0 + waste)  # 0-1, higher = tighter fit
+
+                    # Teacher room preference
+                    teacher_pref = pref_map.get(event.teacher_id)
+                    teacher_room_w = teacher_pref.get_room_weight(room.room_id) if teacher_pref else 0.5
+
+                    # Student group room preferences
+                    group_room_ws = []
+                    for gid in event.student_group_ids:
+                        gp = pref_map.get(gid)
+                        group_room_ws.append(gp.get_room_weight(room.room_id) if gp else 0.5)
+                    avg_group_room = sum(group_room_ws) / len(group_room_ws) if group_room_ws else 0.5
+
+                    # Weighted score: capacity fit (0.5) + teacher pref (0.3) + student pref (0.2)
+                    score = 0.5 * capacity_score + 0.3 * teacher_room_w + 0.2 * avg_group_room
+
+                    if score > best_score:
+                        best_score = score
                         best_room = room
 
                 if best_room:

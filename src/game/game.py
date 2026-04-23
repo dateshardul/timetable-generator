@@ -99,17 +99,33 @@ class TimetableGame:
 
         event = self.players[player_id].event
 
-        # Preference reward: avg of teacher + student group preferences
+        # Multi-dimensional preference reward (matches solver's payoff exactly)
         teacher_pref = self.pref_map.get(event.teacher_id)
-        teacher_w = teacher_pref.get_weight(strategy) if teacher_pref else 0.5
 
-        group_weights = []
+        # 1. Timeslot preference
+        teacher_ts_w = teacher_pref.get_weight(strategy) if teacher_pref else 0.5
+        group_ts_weights = []
         for gid in event.student_group_ids:
             gp = self.pref_map.get(gid)
-            group_weights.append(gp.get_weight(strategy) if gp else 0.5)
-        avg_group_w = sum(group_weights) / len(group_weights) if group_weights else 0.5
+            group_ts_weights.append(gp.get_weight(strategy) if gp else 0.5)
+        avg_group_ts = sum(group_ts_weights) / len(group_ts_weights) if group_ts_weights else 0.5
+        timeslot_pref = (teacher_ts_w + avg_group_ts) / 2.0
 
-        pref_reward = (teacher_w + avg_group_w) / 2.0
+        # 2. Teacher-for-course preference
+        course_pref = teacher_pref.get_course_weight(event.course_id) if teacher_pref else 0.5
+
+        # 3. Student-for-teacher preference
+        teacher_pref_from_students = []
+        for gid in event.student_group_ids:
+            gp = self.pref_map.get(gid)
+            if gp:
+                teacher_pref_from_students.append(gp.get_teacher_weight(event.teacher_id))
+        avg_teacher_pref = (
+            sum(teacher_pref_from_students) / len(teacher_pref_from_students)
+            if teacher_pref_from_students else 0.5
+        )
+
+        pref_reward = 0.6 * timeslot_pref + 0.25 * avg_teacher_pref + 0.15 * course_pref
 
         # Conflict penalty: sum of edge weights for neighbors at same timeslot
         conflict_pen = 0.0
