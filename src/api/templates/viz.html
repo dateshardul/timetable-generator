@@ -140,6 +140,19 @@
         .anim-log-entry.greedy { border-left-color: #58a6ff; }
         .anim-log-entry.best_response { border-left-color: #3fb950; }
 
+        /* Bipartite graph */
+        .bp-edge { stroke-width:2; fill:none; transition: stroke 0.3s, opacity 0.3s; }
+        .bp-edge.bp-normal { stroke:#30363d; opacity:0.4; }
+        .bp-edge.bp-active { stroke:#58a6ff; opacity:0.9; stroke-width:2.5; }
+        .bp-edge.bp-conflict { stroke:#f85149; opacity:1; stroke-width:3; }
+        .bp-edge.bp-moving { stroke:#d29922; opacity:0.9; stroke-dasharray:6 3; }
+        .bp-edge.bp-hidden { opacity:0; }
+        .bp-player { cursor:pointer; }
+        .bp-resource { cursor:default; }
+        @keyframes bp-pulse { 0%{r:14;} 50%{r:18;} 100%{r:14;} }
+        .bp-resource-conflict { animation: bp-pulse 0.6s ease-out; }
+        .main-view-btn.active { background:#30363d; color:#e7e9ea; }
+
         /* Player arena cards */
         .player-card { padding:8px 10px; border:1px solid #30363d; border-radius:6px; margin-bottom:6px; font-size:12px; transition:all 0.3s; position:relative; overflow:hidden; }
         .player-card .pc-name { font-weight:600; font-size:13px; }
@@ -347,10 +360,19 @@
             <div id="anim-narration" style="padding:8px 12px;background:#0d1117;border:1px solid #30363d;border-radius:6px;margin-bottom:10px;font-size:13px;color:#8b949e;min-height:36px;flex-shrink:0;">
                 Click Play to watch the solver fill the timetable step by step.
             </div>
+            <!-- View toggle: Grid vs Bipartite -->
+            <div style="display:flex;gap:4px;margin-bottom:8px;flex-shrink:0;">
+                <button class="btn main-view-btn active" data-mainview="grid" style="font-size:12px;padding:5px 12px;">Timetable Grid</button>
+                <button class="btn main-view-btn" data-mainview="bipartite" style="font-size:12px;padding:5px 12px;">Player vs Resource</button>
+            </div>
             <!-- Empty state -->
             <div class="empty-state" id="solver-empty"><div class="empty-icon">&#9654;</div><p>Generate a timetable first to see the solver animation.</p></div>
             <!-- Animated timetable grid -->
             <div id="anim-grid-wrap" style="flex:1;overflow:auto;display:none;"></div>
+            <!-- Bipartite graph -->
+            <div id="bipartite-wrap" style="flex:1;overflow:hidden;display:none;">
+                <svg id="bipartite-svg" style="width:100%;height:100%;display:block;"></svg>
+            </div>
         </div>
         <div class="panel" id="solver-controls" style="display:flex;flex-direction:column;">
             <!-- View toggle -->

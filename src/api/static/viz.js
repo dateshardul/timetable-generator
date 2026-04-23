@@ -17,7 +17,8 @@ const HOURS = [
 
 // ─── State ──────────────────────────────────────────────────────────────────
 let formData = { teachers:[], student_groups:[], rooms:[], courses:[], timeslots:new Set() };
-let state = { inputData:null, result:null, graphData:null };
+let state = { inputData:null, result:null, graphData:null, generation:0 };
+let renderedGeneration = { solver:0, timetable:0 };
 let idCounters = { teacher:1, group:1, room:1, course:1, section:1 };
 
 function plural(n, word) { return n === 1 ? `${n} ${word}` : `${n} ${word}s`; }
@@ -543,6 +544,7 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
         document.getElementById('status').textContent =
             `Generated — ${plural(n,'iteration')}, ${state.result.converged ? 'converged' : 'not converged'}`;
 
+        state.generation++;
         buildGraphData();
 
         // Switch to graph tab FIRST so containers are visible and have dimensions
@@ -756,6 +758,11 @@ function renderSolverView() {
     document.getElementById('player-cards').innerHTML = cardsHtml;
 
     updateAnimScoreboard(0, 0, new Set(), '—');
+
+    // If bipartite view is active, render it
+    if (document.querySelector('.main-view-btn[data-mainview="bipartite"]')?.classList.contains('active')) {
+        renderBipartite();
+    }
 }
 
 function parseTimeslotStr(tsStr) {
@@ -901,6 +908,9 @@ function animStep() {
         }
     }
 
+    // Update bipartite graph if visible
+    bpAnimStep(step);
+
     animState.stepIdx++;
 }
 
@@ -944,6 +954,8 @@ function animReset() {
         card.querySelector('.pc-status').innerHTML = '<span style="color:#484f58;">&#9679;</span> Waiting for slot...';
         card.querySelector('.pc-bar').style.width = '0%';
     });
+    // Reset bipartite
+    bpReset();
 }
 
 document.getElementById('btn-play').addEventListener('click', animPlay);
@@ -961,6 +973,216 @@ document.querySelectorAll('.sidebar-view-btn').forEach(btn => {
         document.getElementById('anim-log-wrap').style.display = view === 'log' ? '' : 'none';
     });
 });
+
+// Main view toggle (Grid / Bipartite)
+document.querySelectorAll('.main-view-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('.main-view-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        const view = btn.dataset.mainview;
+        document.getElementById('anim-grid-wrap').style.display = view === 'grid' && state.result ? '' : 'none';
+        document.getElementById('bipartite-wrap').style.display = view === 'bipartite' && state.result ? '' : 'none';
+        if (view === 'bipartite' && state.result) renderBipartite();
+    });
+});
+
+// ─── Bipartite Player-Resource Graph ────────────────────────────────────────
+let bpState = { playerNodes:[], resourceNodes:[], edges:{}, svg:null };
+
+function renderBipartite() {
+    if (!state.result || !animState.eventInfo) return;
+    const wrap = document.getElementById('bipartite-wrap');
+    wrap.style.display = '';
+    const svgEl = document.getElementById('bipartite-svg');
+    const svg = d3.select(svgEl);
+    svg.selectAll('*').remove();
+
+    const rect = svgEl.getBoundingClientRect();
+    const W = Math.max(rect.width, 400);
+    const H = Math.max(rect.height, 300);
+    svg.attr('viewBox', `0 0 ${W} ${H}`);
+
+    const eventInfo = animState.eventInfo;
+    const steps = animState.steps || [];
+    const colorScale = animState.colorScale;
+
+    // Build player list (left side)
+    const playerIds = Object.keys(eventInfo);
+    // Build resource list (right side) — unique timeslots from all steps
+    const tsSet = new Set();
+    steps.forEach(s => { tsSet.add(s.timeslot); if (s.old_timeslot) tsSet.add(s.old_timeslot); });
+    // Also add from final assignments
+    (state.result.assignments||[]).forEach(a => tsSet.add(a.timeslot));
+    const resourceIds = [...tsSet].sort();
+
+    const leftX = 120;
+    const rightX = W - 120;
+    const playerSpacing = Math.min(28, (H - 40) / Math.max(playerIds.length, 1));
+    const resourceSpacing = Math.min(32, (H - 40) / Math.max(resourceIds.length, 1));
+    const playerStartY = (H - playerIds.length * playerSpacing) / 2 + playerSpacing / 2;
+    const resourceStartY = (H - resourceIds.length * resourceSpacing) / 2 + resourceSpacing / 2;
+
+    // Player nodes
+    const players = playerIds.map((pid, i) => ({
+        id: pid, x: leftX, y: playerStartY + i * playerSpacing,
+        info: eventInfo[pid], color: colorScale(eventInfo[pid]?.course_name || '')
+    }));
+
+    // Resource nodes
+    const resources = resourceIds.map((rid, i) => ({
+        id: rid, x: rightX, y: resourceStartY + i * resourceSpacing,
+        label: rid.replace(/\s*\(.*\)/, '')
+    }));
+    const resourceMap = {};
+    resources.forEach(r => { resourceMap[r.id] = r; });
+
+    // Column labels
+    svg.append('text').attr('x', leftX).attr('y', 16).attr('text-anchor','middle')
+        .attr('fill','#58a6ff').attr('font-size',13).attr('font-weight',600).text('Players (Events)');
+    svg.append('text').attr('x', rightX).attr('y', 16).attr('text-anchor','middle')
+        .attr('fill','#d29922').attr('font-size',13).attr('font-weight',600).text('Resources (Timeslots)');
+
+    // Edge group (drawn first, under nodes)
+    const edgeGroup = svg.append('g').attr('class','bp-edges');
+
+    // Player circles + labels
+    const playerGroup = svg.append('g');
+    playerGroup.selectAll('circle').data(players).join('circle')
+        .attr('cx', d => d.x).attr('cy', d => d.y).attr('r', 8)
+        .attr('fill', d => d.color).attr('stroke','#0f1419').attr('stroke-width',1.5)
+        .attr('class','bp-player');
+    playerGroup.selectAll('text').data(players).join('text')
+        .attr('x', d => d.x - 16).attr('y', d => d.y + 4)
+        .attr('text-anchor','end').attr('fill','#8b949e').attr('font-size',10)
+        .text(d => {
+            const name = d.info?.course_name || d.id;
+            return name.length > 12 ? name.slice(0,11)+'...' : name;
+        });
+
+    // Resource rectangles + labels
+    const resGroup = svg.append('g');
+    resGroup.selectAll('rect').data(resources).join('rect')
+        .attr('x', d => d.x - 10).attr('y', d => d.y - 10).attr('width', 20).attr('height', 20)
+        .attr('rx', 4).attr('fill','#21262d').attr('stroke','#484f58').attr('stroke-width',1)
+        .attr('class','bp-resource').attr('id', d => 'bp-res-' + d.id.replace(/[^a-zA-Z0-9]/g,'_'));
+    resGroup.selectAll('text').data(resources).join('text')
+        .attr('x', d => d.x + 18).attr('y', d => d.y + 4)
+        .attr('text-anchor','start').attr('fill','#8b949e').attr('font-size',10)
+        .text(d => d.label);
+
+    // Store for animation updates
+    bpState.playerNodes = players;
+    bpState.resourceNodes = resources;
+    bpState.resourceMap = resourceMap;
+    bpState.edgeGroup = edgeGroup;
+    bpState.svg = svg;
+    bpState.edges = {}; // pid -> {line, resourceId}
+
+    // Draw edges for current animation state (replay up to current step)
+    const currentAssignments = {};
+    for (let i = 0; i < animState.stepIdx; i++) {
+        const s = animState.steps[i];
+        currentAssignments[s.event_id] = s.timeslot;
+    }
+    Object.entries(currentAssignments).forEach(([pid, tsStr]) => {
+        bpAddEdge(pid, tsStr, 'bp-active');
+    });
+    bpHighlightConflicts(currentAssignments);
+}
+
+function bpAddEdge(playerId, timeslotStr, cssClass) {
+    const player = bpState.playerNodes.find(p => p.id === playerId);
+    const resource = bpState.resourceMap[timeslotStr];
+    if (!player || !resource || !bpState.edgeGroup) return;
+
+    // Remove old edge for this player
+    bpRemoveEdge(playerId);
+
+    // Draw curved edge
+    const midX = (player.x + resource.x) / 2;
+    const line = bpState.edgeGroup.append('path')
+        .attr('d', `M${player.x+8},${player.y} C${midX},${player.y} ${midX},${resource.y} ${resource.x-10},${resource.y}`)
+        .attr('class', `bp-edge ${cssClass}`)
+        .attr('id', 'bp-edge-' + playerId.replace(/[^a-zA-Z0-9]/g,'_'));
+
+    bpState.edges[playerId] = { line, resourceId: timeslotStr };
+}
+
+function bpRemoveEdge(playerId) {
+    const existing = bpState.edges[playerId];
+    if (existing) {
+        existing.line.transition().duration(200).attr('opacity', 0).remove();
+        delete bpState.edges[playerId];
+    }
+}
+
+function bpHighlightConflicts(assignments) {
+    if (!bpState.svg) return;
+    // Reset all resource highlights
+    bpState.svg.selectAll('.bp-resource').attr('stroke','#484f58').attr('stroke-width',1);
+
+    // Find timeslots with conflicting players (same teacher or group at same slot)
+    const slotPlayers = {};
+    Object.entries(assignments).forEach(([pid, ts]) => {
+        (slotPlayers[ts] = slotPlayers[ts] || []).push(pid);
+    });
+
+    const eventInfo = animState.eventInfo;
+    Object.entries(slotPlayers).forEach(([ts, pids]) => {
+        if (pids.length < 2) return;
+        // Check for actual conflicts (same teacher or student group)
+        let hasConflict = false;
+        for (let i = 0; i < pids.length && !hasConflict; i++) {
+            for (let j = i+1; j < pids.length; j++) {
+                const a = eventInfo[pids[i]], b = eventInfo[pids[j]];
+                if (!a || !b) continue;
+                if (a.teacher_id === b.teacher_id) { hasConflict = true; break; }
+                // Check shared student groups (would need group info — approximate with section)
+            }
+        }
+        if (hasConflict) {
+            const resId = 'bp-res-' + ts.replace(/[^a-zA-Z0-9]/g,'_');
+            bpState.svg.select('#' + resId)
+                .attr('stroke','#f85149').attr('stroke-width',2.5)
+                .classed('bp-resource-conflict', true);
+            // Mark conflicting edges
+            pids.forEach(pid => {
+                const edgeId = '#bp-edge-' + pid.replace(/[^a-zA-Z0-9]/g,'_');
+                bpState.svg.select(edgeId).attr('class','bp-edge bp-conflict');
+            });
+        }
+    });
+}
+
+function bpAnimStep(step) {
+    if (!bpState.svg) return;
+    const cssClass = step.phase === 'greedy' ? 'bp-active' : 'bp-active';
+
+    // If moving, briefly show old edge as dashed before removing
+    if (step.old_timeslot) {
+        const oldEdgeId = '#bp-edge-' + step.event_id.replace(/[^a-zA-Z0-9]/g,'_');
+        bpState.svg.select(oldEdgeId).attr('class','bp-edge bp-moving');
+        setTimeout(() => {
+            bpRemoveEdge(step.event_id);
+            bpAddEdge(step.event_id, step.timeslot, cssClass);
+            // Rebuild conflict highlights
+            const current = {};
+            Object.entries(bpState.edges).forEach(([pid, e]) => { current[pid] = e.resourceId; });
+            bpHighlightConflicts(current);
+        }, 250);
+    } else {
+        bpAddEdge(step.event_id, step.timeslot, cssClass);
+        const current = {};
+        Object.entries(bpState.edges).forEach(([pid, e]) => { current[pid] = e.resourceId; });
+        bpHighlightConflicts(current);
+    }
+}
+
+function bpReset() {
+    if (bpState.edgeGroup) bpState.edgeGroup.selectAll('*').remove();
+    bpState.edges = {};
+    if (bpState.svg) bpState.svg.selectAll('.bp-resource').attr('stroke','#484f58').attr('stroke-width',1);
+}
 
 // ─── Timetable Grid ─────────────────────────────────────────────────────────
 function renderTimetableGrid(filterType, filterValue) {
@@ -1070,12 +1292,14 @@ const tabObserver = new MutationObserver(() => {
         }
     }
     if (state.result && document.getElementById('tab-solver').classList.contains('active')) {
-        if (document.getElementById('anim-grid-wrap').style.display === 'none' || !document.getElementById('anim-grid-wrap').hasChildNodes()) {
+        if (renderedGeneration.solver !== state.generation) {
+            renderedGeneration.solver = state.generation;
             renderSolverView();
         }
     }
     if (state.result && document.getElementById('tab-timetable').classList.contains('active')) {
-        if (!document.getElementById('timetable-grid').hasChildNodes()) {
+        if (renderedGeneration.timetable !== state.generation) {
+            renderedGeneration.timetable = state.generation;
             renderTimetableGrid();
             populateFilters();
         }
