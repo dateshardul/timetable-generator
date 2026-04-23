@@ -179,22 +179,71 @@ class ClassicalSolver(SolverBackend):
         # Phase C: Room assignment (greedy best-fit decreasing)
         room_assignments = self._assign_rooms(assignment, event_map, rooms)
 
+        # Phase D: Game-theoretic verification
+        game_analysis = self._analyze_game(
+            events, timeslots, graph, preferences, assignment
+        )
+
         # Build output
-        assignments = []
+        assignments_out = []
         for eid, ts in assignment.items():
-            assignments.append(Assignment(
+            assignments_out.append(Assignment(
                 event_id=eid,
                 timeslot=ts,
                 room_id=room_assignments.get(eid),
             ))
 
-        return Timetable(
-            assignments=assignments,
+        timetable = Timetable(
+            assignments=assignments_out,
             converged=converged,
             iterations=iterations,
             solver=self.name,
             steps=steps,
         )
+        timetable.metrics["game_theory"] = game_analysis
+        return timetable
+
+    def _analyze_game(
+        self,
+        events: list[Event],
+        timeslots: list[TimeSlot],
+        graph: nx.Graph,
+        preferences: list[StakeholderPreferences],
+        assignment: dict[str, TimeSlot],
+    ) -> dict:
+        """Run formal game-theoretic analysis on the final assignment."""
+        from src.game.game import TimetableGame, StrategyProfile
+        from src.game.potential import PotentialFunction
+        from src.game.equilibrium import NashVerifier
+        from src.game.welfare import WelfareAnalyzer
+
+        game = TimetableGame(events, timeslots, graph, preferences)
+        profile = StrategyProfile(assignments=dict(assignment))
+
+        # Verify Nash equilibrium
+        nash_report = NashVerifier(game).verify(profile)
+
+        # Compute potential function
+        phi = PotentialFunction(game)
+        phi_value = phi.compute(profile)
+        convergence_bound = phi.convergence_bound(profile)
+
+        # Welfare analysis
+        welfare = WelfareAnalyzer(game)
+        welfare_report = welfare.analyze(profile)
+        stakeholder_utils = welfare.stakeholder_utilities(profile)
+        poa_estimate = welfare.estimate_price_of_anarchy(profile, num_random_samples=50)
+        welfare_report.estimated_poa = poa_estimate
+
+        return {
+            "nash_equilibrium": nash_report.to_dict(),
+            "potential_function": {
+                "phi": round(phi_value, 6),
+                "convergence_bound": convergence_bound,
+            },
+            "welfare": welfare_report.to_dict(),
+            "stakeholder_utilities": stakeholder_utils,
+        }
 
     def _payoff(
         self,

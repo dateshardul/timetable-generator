@@ -51,8 +51,11 @@ class Orchestrator:
         # Solve
         timetable = self.solver.solve(graph, events, timeslots, rooms, preferences)
 
-        # Compute metrics
+        # Compute metrics (preserve game_theory analysis from solver)
+        game_theory = timetable.metrics.get("game_theory")
         metrics = compute_metrics(timetable, events, rooms, preferences)
+        if game_theory:
+            metrics["game_theory"] = game_theory
         timetable.metrics = metrics
 
         # Validate
@@ -87,7 +90,10 @@ class Orchestrator:
             frozen_events=set(frozen_event_ids),
         )
 
+        game_theory = timetable.metrics.get("game_theory")
         metrics = compute_metrics(timetable, events, rooms, preferences)
+        if game_theory:
+            metrics["game_theory"] = game_theory
         timetable.metrics = metrics
         validation = validate_timetable(timetable, events, rooms)
 
