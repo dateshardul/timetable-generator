@@ -140,6 +140,21 @@
         .anim-log-entry.greedy { border-left-color: #58a6ff; }
         .anim-log-entry.best_response { border-left-color: #3fb950; }
 
+        /* Player arena cards */
+        .player-card { padding:8px 10px; border:1px solid #30363d; border-radius:6px; margin-bottom:6px; font-size:12px; transition:all 0.3s; position:relative; overflow:hidden; }
+        .player-card .pc-name { font-weight:600; font-size:13px; }
+        .player-card .pc-status { color:#8b949e; margin-top:2px; }
+        .player-card .pc-slot { display:inline-block; padding:1px 6px; border-radius:4px; font-size:11px; font-weight:600; }
+        .player-card.pc-waiting { background:#161b22; border-color:#30363d; }
+        .player-card.pc-placed { border-color:#238636; background:#23863611; }
+        .player-card.pc-conflict { border-color:#f85149; background:#f8514911; animation: card-pulse 0.8s ease-out; }
+        .player-card.pc-moving { border-color:#d29922; background:#d2992211; animation: card-slide 0.4s ease-out; }
+        .player-card.pc-settled { border-color:#58a6ff44; background:#161b22; }
+        .player-card .pc-bar { position:absolute; bottom:0; left:0; height:2px; background:#58a6ff; transition:width 0.3s; }
+        @keyframes card-pulse { 0%{box-shadow:0 0 0 0 #f8514966;} 50%{box-shadow:0 0 8px 3px #f8514966;} 100%{box-shadow:none;} }
+        @keyframes card-slide { 0%{transform:translateX(-4px);opacity:0.5;} 100%{transform:translateX(0);opacity:1;} }
+        .sidebar-view-btn.active { background:#30363d; color:#e7e9ea; }
+
         /* Submissions tab */
         .sub-card { background:#161b22; border:1px solid #30363d; border-radius:6px; padding:12px; margin-bottom:8px; }
         .sub-card .sub-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:6px; }
@@ -337,9 +352,23 @@
             <!-- Animated timetable grid -->
             <div id="anim-grid-wrap" style="flex:1;overflow:auto;display:none;"></div>
         </div>
-        <div class="panel" id="solver-controls">
-            <h3>Event Log</h3>
-            <div id="anim-log" style="font-size:12px;max-height:100%;overflow-y:auto;"></div>
+        <div class="panel" id="solver-controls" style="display:flex;flex-direction:column;">
+            <!-- View toggle -->
+            <div style="display:flex;gap:4px;margin-bottom:10px;">
+                <button class="btn sidebar-view-btn active" data-view="arena" style="flex:1;font-size:12px;padding:6px;">Players</button>
+                <button class="btn sidebar-view-btn" data-view="log" style="flex:1;font-size:12px;padding:6px;">Event Log</button>
+            </div>
+            <!-- Player Arena -->
+            <div id="player-arena" style="flex:1;overflow-y:auto;">
+                <div style="font-size:11px;color:#484f58;margin-bottom:8px;">
+                    Each event is a <strong style="color:#8b949e;">player</strong> competing for <strong style="color:#8b949e;">timeslot resources</strong>.
+                </div>
+                <div id="player-cards"></div>
+            </div>
+            <!-- Event Log (hidden by default) -->
+            <div id="anim-log-wrap" style="flex:1;overflow-y:auto;display:none;">
+                <div id="anim-log" style="font-size:12px;"></div>
+            </div>
         </div>
     </div>
 

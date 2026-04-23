@@ -742,6 +742,19 @@ function renderSolverView() {
     document.getElementById('anim-total-events').textContent = totalEvents;
     document.getElementById('anim-log').innerHTML = '';
 
+    // Build player cards (all start as "waiting")
+    const cardsHtml = Object.entries(eventInfo).map(([eid, info]) => {
+        const bg = colorScale(info.course_name || '');
+        return `<div class="player-card pc-waiting" id="pc-${eid.replace(/[^a-zA-Z0-9]/g,'_')}">
+            <div class="pc-name" style="color:${bg};">${info.course_name} <span style="color:#484f58;font-weight:400;">L${eid.split('_L')[1]||0}</span></div>
+            <div class="pc-status">
+                <span style="color:#484f58;">&#9679;</span> Waiting for slot...
+            </div>
+            <div class="pc-bar" style="width:0%;"></div>
+        </div>`;
+    }).join('');
+    document.getElementById('player-cards').innerHTML = cardsHtml;
+
     updateAnimScoreboard(0, 0, new Set(), '—');
 }
 
@@ -757,7 +770,12 @@ function animStep() {
     if (animState.stepIdx >= animState.steps.length) {
         animPause();
         document.getElementById('anim-narration').innerHTML =
-            '<span style="color:#3fb950;">&#10003; Solver finished! Timetable complete.</span>';
+            '<span style="color:#3fb950;">&#10003; Nash Equilibrium reached! No player can improve by switching.</span>';
+        // Mark all players as settled
+        document.querySelectorAll('.player-card').forEach(c => {
+            c.classList.remove('pc-moving','pc-conflict');
+            if (c.classList.contains('pc-placed')) c.classList.replace('pc-placed','pc-settled');
+        });
         return;
     }
 
@@ -829,6 +847,60 @@ function animStep() {
     const log = document.getElementById('anim-log');
     log.prepend(logEntry);
 
+    // ── Update player cards ──
+    // Reset all cards to remove "active" highlight
+    document.querySelectorAll('.player-card').forEach(c => {
+        c.classList.remove('pc-moving', 'pc-conflict');
+    });
+
+    // Update the current player's card
+    const cardId = 'pc-' + step.event_id.replace(/[^a-zA-Z0-9]/g, '_');
+    const card = document.getElementById(cardId);
+    if (card) {
+        const shortSlot = step.timeslot.replace(/\s*\(.*\)/, '');
+        if (step.phase === 'greedy') {
+            card.className = 'player-card pc-placed';
+            card.querySelector('.pc-status').innerHTML =
+                `<span class="pc-slot" style="background:${bg}44;color:${bg};">${shortSlot}</span> ` +
+                (step.conflicts_after > 0
+                    ? `<span style="color:#f85149;">&#9888; ${step.conflicts_after} conflict${step.conflicts_after>1?'s':''}</span>`
+                    : '<span style="color:#3fb950;">&#10003;</span>');
+        } else {
+            card.className = 'player-card pc-moving';
+            const delta = step.conflicts_before - step.conflicts_after;
+            card.querySelector('.pc-status').innerHTML =
+                `<span class="pc-slot" style="background:${bg}44;color:${bg};">${shortSlot}</span> ` +
+                (delta > 0
+                    ? `<span style="color:#3fb950;">&#8593; resolved ${delta} conflict${delta>1?'s':''}</span>`
+                    : '<span style="color:#d29922;">&#8634; moved for better fit</span>');
+        }
+        // Payoff bar (rough: 0 conflicts = full bar)
+        const barWidth = step.conflicts_after === 0 ? 100 : Math.max(10, 100 - step.conflicts_after * 30);
+        card.querySelector('.pc-bar').style.width = barWidth + '%';
+        card.querySelector('.pc-bar').style.background = step.conflicts_after > 0 ? '#f85149' : '#3fb950';
+
+        // Scroll card into view
+        card.scrollIntoView({behavior:'smooth', block:'nearest'});
+    }
+
+    // Mark conflict-involved players
+    if (step.conflicts_after > 0) {
+        // Find which events are in conflict at this timeslot
+        if (ts) {
+            const cell = document.getElementById(`anim-cell-${ts.day}-${ts.period}`);
+            if (cell) {
+                const eventsInCell = cell.querySelectorAll('[data-eid]');
+                eventsInCell.forEach(el => {
+                    const conflictCardId = 'pc-' + el.dataset.eid.replace(/[^a-zA-Z0-9]/g, '_');
+                    const conflictCard = document.getElementById(conflictCardId);
+                    if (conflictCard && conflictCard !== card) {
+                        conflictCard.classList.add('pc-conflict');
+                    }
+                });
+            }
+        }
+    }
+
     animState.stepIdx++;
 }
 
@@ -862,17 +934,33 @@ function animPause() {
 function animReset() {
     animPause();
     animState.stepIdx = 0;
-    // Clear all animated cells
     document.querySelectorAll('#anim-grid-wrap td').forEach(td => { td.innerHTML = ''; });
     document.getElementById('anim-log').innerHTML = '';
     document.getElementById('anim-narration').textContent = 'Click Play to watch the solver fill the timetable step by step.';
     updateAnimScoreboard(0, 0, new Set(), '—');
+    // Reset player cards
+    document.querySelectorAll('.player-card').forEach(card => {
+        card.className = 'player-card pc-waiting';
+        card.querySelector('.pc-status').innerHTML = '<span style="color:#484f58;">&#9679;</span> Waiting for slot...';
+        card.querySelector('.pc-bar').style.width = '0%';
+    });
 }
 
 document.getElementById('btn-play').addEventListener('click', animPlay);
 document.getElementById('btn-pause').addEventListener('click', animPause);
 document.getElementById('btn-step').addEventListener('click', () => { animPause(); animStep(); });
 document.getElementById('btn-reset').addEventListener('click', animReset);
+
+// Sidebar view toggle (Players / Event Log)
+document.querySelectorAll('.sidebar-view-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('.sidebar-view-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        const view = btn.dataset.view;
+        document.getElementById('player-arena').style.display = view === 'arena' ? '' : 'none';
+        document.getElementById('anim-log-wrap').style.display = view === 'log' ? '' : 'none';
+    });
+});
 
 // ─── Timetable Grid ─────────────────────────────────────────────────────────
 function renderTimetableGrid(filterType, filterValue) {
