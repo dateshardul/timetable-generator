@@ -89,8 +89,9 @@ def create_app(solver_name: str = "classical") -> Flask:
             return jsonify({"error": "No JSON body provided"}), 400
         input_data = body.get("input_data", {})
         frozen = body.get("frozen_event_ids", [])
+        existing = body.get("existing_assignments", None)
         try:
-            result = orchestrator.reschedule(input_data, frozen)
+            result = orchestrator.reschedule(input_data, frozen, existing)
             return jsonify(result)
         except Exception as e:
             return jsonify({"error": str(e)}), 500

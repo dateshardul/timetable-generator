@@ -31,6 +31,7 @@ class SolverBackend(abc.ABC):
         rooms: list[Room],
         preferences: list[StakeholderPreferences],
         frozen_events: set[str] | None = None,
+        pre_assignments: dict[str, TimeSlot] | None = None,
     ) -> Timetable:
         """Solve the timetable scheduling problem.
 

@@ -74,9 +74,19 @@ class Orchestrator:
         return self.generate(input_data)
 
     def reschedule(
-        self, input_data: dict, frozen_event_ids: list[str]
+        self,
+        input_data: dict,
+        frozen_event_ids: list[str],
+        existing_assignments: dict[str, dict] | None = None,
     ) -> dict:
-        """Partial re-solve: freeze unaffected events, re-solve the rest."""
+        """Partial re-solve: freeze unaffected events, re-solve only disrupted ones.
+
+        Args:
+            input_data: Full input data (may have updated constraints).
+            frozen_event_ids: Events that should keep their current assignments.
+            existing_assignments: Current timetable as {event_id: {"timeslot": str, "room_id": str}}.
+                Frozen events are pre-loaded from here.
+        """
         courses, sections, teachers, student_groups, rooms, timeslots, preferences = (
             self._parse_input(input_data)
         )
@@ -85,9 +95,23 @@ class Orchestrator:
         group_map = {g.group_id: g for g in student_groups}
         graph = build_conflict_graph(events, course_map, group_map)
 
+        # Parse existing assignments into pre-loaded timeslot map
+        pre_assignments = {}
+        if existing_assignments:
+            day_map = {d.value: d for d in Day}
+            for eid, asg in existing_assignments.items():
+                if eid in set(frozen_event_ids):
+                    ts_str = asg.get("timeslot", "")
+                    # Parse timeslot string back to TimeSlot object
+                    for ts in timeslots:
+                        if str(ts) == ts_str:
+                            pre_assignments[eid] = ts
+                            break
+
         timetable = self.solver.solve(
             graph, events, timeslots, rooms, preferences,
             frozen_events=set(frozen_event_ids),
+            pre_assignments=pre_assignments,
         )
 
         game_theory = timetable.metrics.get("game_theory")

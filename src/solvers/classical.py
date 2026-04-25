@@ -62,6 +62,7 @@ class ClassicalSolver(SolverBackend):
         rooms: list[Room],
         preferences: list[StakeholderPreferences],
         frozen_events: set[str] | None = None,
+        pre_assignments: dict[str, TimeSlot] | None = None,
     ) -> Timetable:
         frozen_events = frozen_events or set()
         rng = random.Random(self.seed)
@@ -71,8 +72,8 @@ class ClassicalSolver(SolverBackend):
         pref_map = self._build_pref_map(preferences)
         section_events = self._build_section_events(events)
 
-        # Current assignment: event_id -> TimeSlot
-        assignment: dict[str, TimeSlot] = {}
+        # Pre-load existing assignments for frozen events (rescheduling)
+        assignment: dict[str, TimeSlot] = dict(pre_assignments) if pre_assignments else {}
         steps: list[SolverStep] = []
 
         def count_conflicts(a: dict[str, TimeSlot]) -> int:
