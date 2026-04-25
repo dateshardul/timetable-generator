@@ -300,6 +300,38 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- Solver Settings -->
+                <div class="entity-section">
+                    <div class="entity-header" data-section="solver-settings">
+                        <h4>Solver Settings</h4>
+                        <span class="chevron">&#9654;</span>
+                    </div>
+                    <div class="entity-body" id="body-solver-settings">
+                        <div style="font-size:13px;color:#8b949e;margin-bottom:10px;">Adjust how much the solver weighs each preference dimension.</div>
+                        <div style="display:flex;flex-direction:column;gap:10px;">
+                            <div>
+                                <label style="display:flex;justify-content:space-between;font-size:12px;color:#8b949e;">
+                                    <span>Timeslot preference</span><strong id="w-ts-val" style="color:#e7e9ea;">60%</strong>
+                                </label>
+                                <input type="range" id="w-timeslot" min="0" max="100" value="60" style="width:100%;accent-color:#58a6ff;">
+                            </div>
+                            <div>
+                                <label style="display:flex;justify-content:space-between;font-size:12px;color:#8b949e;">
+                                    <span>Teacher-student fit</span><strong id="w-teacher-val" style="color:#e7e9ea;">25%</strong>
+                                </label>
+                                <input type="range" id="w-teacher" min="0" max="100" value="25" style="width:100%;accent-color:#3fb950;">
+                            </div>
+                            <div>
+                                <label style="display:flex;justify-content:space-between;font-size:12px;color:#8b949e;">
+                                    <span>Course preference</span><strong id="w-course-val" style="color:#e7e9ea;">15%</strong>
+                                </label>
+                                <input type="range" id="w-course" min="0" max="100" value="15" style="width:100%;accent-color:#d2a8ff;">
+                            </div>
+                            <div style="font-size:11px;color:#484f58;">Total: <strong id="w-total">100%</strong> (auto-normalizes if not 100%)</div>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <!-- JSON MODE -->

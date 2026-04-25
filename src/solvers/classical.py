@@ -45,6 +45,8 @@ class ClassicalSolver(SolverBackend):
         # greedy_randomness in [0,1]: 0 = optimal greedy, 1 = fully random initial assignment
         # Use >0 for demo mode to create initial conflicts that best-response resolves
         self.greedy_randomness = greedy_randomness
+        # Payoff weights: (timeslot, teacher_fit, course_fit) — configurable from UI
+        self.payoff_weights = (0.6, 0.25, 0.15)
         self.transition_matrix = transition_matrix or TransitionMatrix()
         self.disruption_map = {d.event_id: d for d in (disruption_costs or [])}
         # prior_assignments: event_id -> (old_timeslot, old_room_id) for disruption calc
@@ -299,7 +301,8 @@ class ClassicalSolver(SolverBackend):
         )
 
         # Weighted combination: timeslot matters most (0.6), then teacher-student fit (0.25), then course fit (0.15)
-        preference_reward = 0.6 * timeslot_pref + 0.25 * avg_teacher_pref + 0.15 * course_pref
+        w_ts, w_te, w_co = self.payoff_weights
+        preference_reward = w_ts * timeslot_pref + w_te * avg_teacher_pref + w_co * course_pref
 
         # Conflict penalty: sum of edge weights for neighbors assigned to same timeslot
         conflict_penalty = 0.0

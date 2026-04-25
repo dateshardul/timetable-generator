@@ -14,6 +14,7 @@ from src.models.timetable import Timetable
 from src.solvers.base import SolverBackend
 from src.solvers.classical import ClassicalSolver
 
+from .feasibility import check_feasibility
 from .metrics import compute_metrics
 from .validator import validate_timetable
 
@@ -48,7 +49,19 @@ class Orchestrator:
         group_map = {g.group_id: g for g in student_groups}
         graph = build_conflict_graph(events, course_map, group_map)
 
-        # Solve
+        # Feasibility check
+        feasibility = check_feasibility(events, timeslots, rooms, graph)
+
+        # Apply solver weights if provided
+        solver_weights = input_data.get("solver_weights")
+        if solver_weights and hasattr(self.solver, 'payoff_weights'):
+            self.solver.payoff_weights = (
+                solver_weights.get("timeslot", 0.6),
+                solver_weights.get("teacher", 0.25),
+                solver_weights.get("course", 0.15),
+            )
+
+        # Solve (even if infeasible — give best-effort result with warnings)
         timetable = self.solver.solve(graph, events, timeslots, rooms, preferences)
 
         # Compute metrics (preserve game_theory analysis from solver)
@@ -63,6 +76,7 @@ class Orchestrator:
 
         result = timetable.to_dict()
         result["validation"] = validation
+        result["feasibility"] = feasibility
         return result
 
     def regenerate(

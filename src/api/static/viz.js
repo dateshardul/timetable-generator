@@ -16,7 +16,7 @@ const HOURS = [
 ];
 
 // ─── State ──────────────────────────────────────────────────────────────────
-let formData = { teachers:[], student_groups:[], rooms:[], courses:[], timeslots:new Set() };
+let formData = { teachers:[], student_groups:[], rooms:[], courses:[], timeslots:new Set(), preferences:[] };
 let state = { inputData:null, result:null, graphData:null, generation:0 };
 let renderedGeneration = { solver:0, timetable:0 };
 let idCounters = { teacher:1, group:1, room:1, course:1, section:1 };
@@ -349,7 +349,7 @@ function buildInputFromForm() {
         student_groups: formData.student_groups.map(g => ({group_id:g.group_id,name:g.name,size:g.size})),
         rooms: formData.rooms.map(r => ({room_id:r.room_id,name:r.name,capacity:r.capacity,room_type:r.room_type||'lecture'})),
         timeslots,
-        preferences: []
+        preferences: formData.preferences || []
     };
 }
 
@@ -494,7 +494,7 @@ document.getElementById('btn-load-sample').addEventListener('click', loadSampleD
 
 document.getElementById('btn-clear-all').addEventListener('click', () => {
     formData.teachers = []; formData.student_groups = []; formData.rooms = [];
-    formData.courses = []; formData.timeslots.clear();
+    formData.courses = []; formData.timeslots.clear(); formData.preferences = [];
     idCounters = {teacher:1,group:1,room:1,course:1,section:1};
     state.inputData = null; state.result = null; state.graphData = null;
     document.getElementById('input-json').value = '';
@@ -526,6 +526,17 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
         inputData = buildInputFromForm();
     }
 
+    // Attach solver weights from sliders
+    const wTs = parseInt(document.getElementById('w-timeslot')?.value || 60);
+    const wTe = parseInt(document.getElementById('w-teacher')?.value || 25);
+    const wCo = parseInt(document.getElementById('w-course')?.value || 15);
+    const wSum = wTs + wTe + wCo || 100;
+    inputData.solver_weights = {
+        timeslot: wTs / wSum,
+        teacher: wTe / wSum,
+        course: wCo / wSum,
+    };
+
     const errors = validateInput(inputData);
     if (errors.length > 0) { showError(errors.join(' ')); return; }
 
@@ -543,8 +554,17 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
         state.result = await resp.json();
 
         const n = state.result.iterations;
-        document.getElementById('status').textContent =
-            `Generated — ${plural(n,'iteration')}, ${state.result.converged ? 'converged' : 'not converged'}`;
+        const feas = state.result.feasibility || {};
+        let statusText = `Generated — ${plural(n,'iteration')}, ${state.result.converged ? 'converged' : 'not converged'}`;
+
+        // Show feasibility warnings/errors
+        if (feas.errors?.length > 0) {
+            showError('Infeasible: ' + feas.errors.join(' '));
+            statusText += ' (INFEASIBLE)';
+        } else if (feas.warnings?.length > 0) {
+            showError('Warning: ' + feas.warnings.join(' '));
+        }
+        document.getElementById('status').textContent = statusText;
 
         state.generation++;
         buildGraphData();
@@ -1416,12 +1436,10 @@ document.getElementById('btn-merge-subs').addEventListener('click', async () => 
     let merged = 0;
     subs.forEach(s => {
         if (s.role === 'teacher') {
-            // Add teacher if not exists
             if (!formData.teachers.find(t => t.teacher_id === s.entity_id)) {
                 formData.teachers.push({teacher_id:s.entity_id, name:s.entity_name||s.entity_id, max_hours_per_week:20});
                 merged++;
             }
-            // Add courses and sections
             (s.courses||[]).forEach(c => {
                 if (!formData.courses.find(fc => fc.course_id === c.course_id)) {
                     formData.courses.push({
@@ -1433,11 +1451,9 @@ document.getElementById('btn-merge-subs').addEventListener('click', async () => 
                     });
                     merged++;
                 } else {
-                    // Ensure this teacher is assigned to a section
                     const course = formData.courses.find(fc => fc.course_id === c.course_id);
                     const hasSection = course.sections.some(sec => sec.teacher_id === s.entity_id);
                     if (!hasSection && course.sections.length > 0) {
-                        // Assign teacher to first unassigned section, or create new one
                         const unassigned = course.sections.find(sec => !sec.teacher_id);
                         if (unassigned) { unassigned.teacher_id = s.entity_id; merged++; }
                     }
@@ -1448,7 +1464,6 @@ document.getElementById('btn-merge-subs').addEventListener('click', async () => 
                 formData.student_groups.push({group_id:s.entity_id, name:s.entity_name||s.entity_id, size:s.group_size||30});
                 merged++;
             }
-            // Link group to course sections
             (s.courses||[]).forEach(c => {
                 const course = formData.courses.find(fc => fc.course_id === c.course_id);
                 if (course) {
@@ -1465,13 +1480,31 @@ document.getElementById('btn-merge-subs').addEventListener('click', async () => 
                 formData.rooms.push({room_id:s.entity_id, name:s.entity_name||s.entity_id, capacity:s.capacity||40, room_type:s.room_type||'lecture'});
                 merged++;
             }
-            // Merge room availability into timeslots
             (s.preferences?.weights||[]).forEach(w => {
                 if (w.weight > 0) {
                     const dayName = typeof w.day === 'string' ? w.day : '';
                     if (dayName && w.period) formData.timeslots.add(`${dayName}-${w.period}`);
                 }
             });
+        }
+
+        // ── Merge timeslot preferences into solver input ──
+        if (s.preferences && (s.preferences.weights||[]).length > 0) {
+            // Remove any existing preference for this entity
+            formData.preferences = (formData.preferences||[]).filter(p => p.entity_id !== s.entity_id);
+            formData.preferences.push({
+                entity_id: s.entity_id,
+                entity_type: s.role === 'teacher' ? 'teacher' : 'student_group',
+                weights: s.preferences.weights.map(w => ({
+                    day: w.day, period: w.period, start_hour: w.start_hour,
+                    start_minute: w.start_minute || 0, duration_minutes: w.duration_minutes || 60,
+                    weight: w.weight
+                })),
+                room_weights: [],
+                teacher_weights: [],
+                course_weights: [],
+            });
+            merged++;
         }
     });
 
@@ -1491,6 +1524,20 @@ if (subTabEl) {
 
 // Also add 'submissions' to allowed hash tabs
 const origSwitchTab = switchTab;
+
+// ─── Weight sliders ─────────────────────────────────────────────────────────
+['w-timeslot','w-teacher','w-course'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('input', () => {
+        const a = parseInt(document.getElementById('w-timeslot').value)||0;
+        const b = parseInt(document.getElementById('w-teacher').value)||0;
+        const c = parseInt(document.getElementById('w-course').value)||0;
+        document.getElementById('w-ts-val').textContent = a+'%';
+        document.getElementById('w-teacher-val').textContent = b+'%';
+        document.getElementById('w-course-val').textContent = c+'%';
+        document.getElementById('w-total').textContent = (a+b+c)+'%';
+    });
+});
 
 // ─── Init ───────────────────────────────────────────────────────────────────
 if (!restoreState()) {
