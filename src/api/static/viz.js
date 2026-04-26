@@ -1013,12 +1013,12 @@ document.querySelectorAll('.main-view-btn').forEach(btn => {
     });
 });
 
-// ─── Enhanced Bipartite Stakeholder-Resource Graph ──────────────────────────
-// Players (left) = Teachers + Student Groups with satisfaction arcs
-// Resources (right) = Timeslots with demand heatmap
-// Features: A=thinking viz, C=satisfaction meters, D=Nash sweep, E=pressure heatmap
-let bpState = { players:[], resources:[], edges:{}, svg:null, resourceMap:{}, playerMap:{},
-                eventToEdgeKey:{}, edgeGroup:null, thinkGroup:null, demandCount:{}, satisfactionData:{} };
+// ─── Force-Directed Bipartite Stakeholder-Resource Graph ────────────────────
+// Players = Teachers + Student Groups (circles with initials + satisfaction arcs)
+// Resources = Timeslots (rounded rects with demand heatmap)
+// Force layout spreads nodes naturally, click-to-highlight like conflict graph
+let bpState = { nodes:[], links:[], sim:null, svg:null, nodeMap:{}, edgeSel:null, nodeSel:null,
+                eventToLinkIds:{}, demandCount:{}, satisfactionData:{}, arcGen:null };
 
 function renderBipartite() {
     if (!state.result || !state.inputData) return;
@@ -1033,334 +1033,345 @@ function renderBipartite() {
     svg.attr('viewBox', `0 0 ${W} ${H}`);
 
     const input = state.inputData;
-    const colorScale = animState.colorScale;
     const eventInfo = animState.eventInfo || {};
 
-    // Build player list
-    const teachers = (input.teachers||[]).map(t => ({id:t.teacher_id, label:t.name||t.teacher_id, type:'teacher', initials:(t.name||t.teacher_id).split(' ').map(w=>w[0]).join('').slice(0,2)}));
-    const groups = (input.student_groups||[]).map(g => ({id:g.group_id, label:g.name||g.group_id, type:'student_group', initials:(g.name||g.group_id).split(' ').map(w=>w[0]).join('').slice(0,2)}));
-    const allPlayers = [...teachers, ...groups];
+    // Build all nodes: players + resources
+    const nodes = [];
+    const nodeMap = {};
 
-    // Build resource list
+    // Players
+    (input.teachers||[]).forEach(t => {
+        const n = {id:t.teacher_id, label:t.name||t.teacher_id, nodeType:'teacher',
+            initials:(t.name||t.teacher_id).split(' ').map(w=>w[0]).join('').slice(0,2),
+            color:'#58a6ff', fx:W*0.15, r:16};
+        nodes.push(n); nodeMap[n.id] = n;
+    });
+    (input.student_groups||[]).forEach(g => {
+        const n = {id:g.group_id, label:g.name||g.group_id, nodeType:'student_group',
+            initials:(g.name||g.group_id).split(' ').map(w=>w[0]).join('').slice(0,2),
+            color:'#3fb950', fx:W*0.15, r:16};
+        nodes.push(n); nodeMap[n.id] = n;
+    });
+
+    // Resources (timeslots)
     const tsSet = new Set();
     (state.result.assignments||[]).forEach(a => tsSet.add(a.timeslot));
-    (animState.steps||[]).forEach(s => { tsSet.add(s.timeslot); if (s.old_timeslot) tsSet.add(s.old_timeslot); });
-    const resourceIds = [...tsSet].sort();
+    (animState.steps||[]).forEach(s => { tsSet.add(s.timeslot); if(s.old_timeslot) tsSet.add(s.old_timeslot); });
+    [...tsSet].sort().forEach(rid => {
+        const n = {id:rid, label:rid.replace(/\s*\(.*\)/,''), nodeType:'resource',
+            initials:'', color:'#484f58', fx:W*0.85, r:12};
+        nodes.push(n); nodeMap[n.id] = n;
+    });
 
-    // Layout
-    const leftX = W * 0.16;
-    const rightX = W * 0.84;
-    const topPad = 30;
-    const pSpacing = Math.min(36, (H - topPad - 10) / Math.max(allPlayers.length, 1));
-    const rSpacing = Math.min(28, (H - topPad - 10) / Math.max(resourceIds.length, 1));
-    const pStartY = topPad + (H - topPad - allPlayers.length * pSpacing) / 2;
-    const rStartY = topPad + (H - topPad - resourceIds.length * rSpacing) / 2;
+    // Initial y positions — spread evenly within each type
+    const playerNodes = nodes.filter(n=>n.nodeType!=='resource');
+    const resNodes = nodes.filter(n=>n.nodeType==='resource');
+    playerNodes.forEach((n,i) => { n.y = H*0.1 + i*(H*0.8)/Math.max(playerNodes.length-1,1); });
+    resNodes.forEach((n,i) => { n.y = H*0.1 + i*(H*0.8)/Math.max(resNodes.length-1,1); });
 
-    const players = allPlayers.map((p, i) => ({...p, x:leftX, y:pStartY+i*pSpacing, color:p.type==='teacher'?'#58a6ff':'#3fb950'}));
-    const playerMap = {}; players.forEach(p => { playerMap[p.id] = p; });
-    const resources = resourceIds.map((rid, i) => ({id:rid, x:rightX, y:rStartY+i*rSpacing, label:rid.replace(/\s*\(.*\)/,'')}));
-    const resourceMap = {}; resources.forEach(r => { resourceMap[r.id] = r; });
-
-    // Defs for gradients/filters
+    // Defs
     const defs = svg.append('defs');
-    defs.append('filter').attr('id','glow')
-        .append('feGaussianBlur').attr('stdDeviation',3).attr('result','coloredBlur');
+    defs.append('filter').attr('id','glow').append('feGaussianBlur').attr('stdDeviation',3);
 
-    // ── Edge group (bottom layer) ──
-    const edgeGroup = svg.append('g').attr('class','bp-edges');
-    // ── Ghost/thinking edges (above edges, below nodes) ──
+    // Link group
+    const linkGroup = svg.append('g');
+    // Think group
     const thinkGroup = svg.append('g').attr('class','bp-think');
+    // Node group
+    const nodeGroup = svg.append('g');
 
-    // ── Resource nodes with heatmap ──
-    const rg = svg.append('g');
-    rg.selectAll('rect').data(resources).join('rect')
-        .attr('x',d=>d.x-12).attr('y',d=>d.y-11).attr('width',24).attr('height',22)
-        .attr('rx',5).attr('fill','#1a1f2e').attr('stroke','#30363d').attr('stroke-width',1.5)
-        .attr('class','bp-resource').attr('id',d=>'bp-res-'+d.id.replace(/[^a-zA-Z0-9]/g,'_'));
-    // Resource demand indicator (small bar inside, updated during animation)
-    rg.selectAll('.bp-demand-bar').data(resources).join('rect')
-        .attr('x',d=>d.x-10).attr('y',d=>d.y+6).attr('width',0).attr('height',3)
-        .attr('rx',1.5).attr('fill','#484f58')
-        .attr('class','bp-demand-bar').attr('id',d=>'bp-demand-'+d.id.replace(/[^a-zA-Z0-9]/g,'_'));
-    rg.selectAll('text').data(resources).join('text')
-        .attr('x',d=>d.x+20).attr('y',d=>d.y+4)
-        .attr('text-anchor','start').attr('fill','#8b949e').attr('font-size',10).text(d=>d.label);
+    // Satisfaction arc generator
+    const arcGen = d3.arc().innerRadius(18).outerRadius(21).startAngle(0);
 
-    // ── Player nodes with initials and satisfaction arcs ──
-    const R = 15; // player node radius
-    const pg = svg.append('g');
+    // Draw nodes
+    const gNodes = nodeGroup.selectAll('g.bp-node').data(nodes).join('g')
+        .attr('class','bp-node').style('cursor','pointer');
 
-    // Satisfaction arc background (grey ring)
-    pg.selectAll('.bp-sat-bg').data(players).join('circle')
-        .attr('cx',d=>d.x).attr('cy',d=>d.y).attr('r',R+3)
-        .attr('fill','none').attr('stroke','#21262d').attr('stroke-width',3);
+    // Resource rectangles
+    gNodes.filter(d=>d.nodeType==='resource').append('rect')
+        .attr('x',-14).attr('y',-12).attr('width',28).attr('height',24)
+        .attr('rx',6).attr('fill','#1a1f2e').attr('stroke','#30363d').attr('stroke-width',1.5)
+        .attr('class','bp-resource-rect');
+    // Resource demand bar
+    gNodes.filter(d=>d.nodeType==='resource').append('rect')
+        .attr('x',-12).attr('y',7).attr('width',0).attr('height',3)
+        .attr('rx',1.5).attr('fill','#484f58').attr('class','bp-demand-bar');
+    // Resource label
+    gNodes.filter(d=>d.nodeType==='resource').append('text')
+        .attr('x',20).attr('y',4).attr('text-anchor','start').attr('fill','#8b949e').attr('font-size',10)
+        .text(d=>d.label);
 
-    // Satisfaction arc foreground (colored, initially 0 length)
-    const arcGen = d3.arc().innerRadius(R+1.5).outerRadius(R+4.5).startAngle(0);
-    pg.selectAll('.bp-sat-arc').data(players).join('path')
-        .attr('transform',d=>`translate(${d.x},${d.y})`)
-        .attr('d', arcGen({endAngle:0}))
-        .attr('fill',d=>d.color)
-        .attr('class','bp-sat-arc').attr('id',d=>'bp-sat-'+d.id.replace(/[^a-zA-Z0-9]/g,'_'));
-
+    // Player satisfaction arc bg
+    gNodes.filter(d=>d.nodeType!=='resource').append('circle')
+        .attr('r',19).attr('fill','none').attr('stroke','#21262d').attr('stroke-width',3);
+    // Player satisfaction arc
+    gNodes.filter(d=>d.nodeType!=='resource').append('path')
+        .attr('d',arcGen({endAngle:0})).attr('fill',d=>d.color).attr('class','bp-sat-arc');
     // Player circle
-    pg.selectAll('.bp-player-circle').data(players).join('circle')
-        .attr('cx',d=>d.x).attr('cy',d=>d.y).attr('r',R)
-        .attr('fill',d=>d.color+'22').attr('stroke',d=>d.color).attr('stroke-width',2)
-        .attr('class','bp-player-circle').attr('id',d=>'bp-player-'+d.id.replace(/[^a-zA-Z0-9]/g,'_'));
-
-    // Initials inside circle
-    pg.selectAll('.bp-initials').data(players).join('text')
-        .attr('x',d=>d.x).attr('y',d=>d.y+4).attr('text-anchor','middle')
-        .attr('fill',d=>d.color).attr('font-size',11).attr('font-weight',700)
+    gNodes.filter(d=>d.nodeType!=='resource').append('circle')
+        .attr('r',d=>d.r).attr('fill',d=>d.color+'22').attr('stroke',d=>d.color).attr('stroke-width',2)
+        .attr('class','bp-player-circle');
+    // Player initials
+    gNodes.filter(d=>d.nodeType!=='resource').append('text')
+        .attr('y',4).attr('text-anchor','middle').attr('fill',d=>d.color).attr('font-size',11).attr('font-weight',700)
         .text(d=>d.initials);
-
-    // Name label
-    pg.selectAll('.bp-name').data(players).join('text')
-        .attr('x',d=>d.x-R-8).attr('y',d=>d.y+4).attr('text-anchor','end')
-        .attr('fill',d=>d.color+'bb').attr('font-size',10)
+    // Player name
+    gNodes.filter(d=>d.nodeType!=='resource').append('text')
+        .attr('x',-24).attr('y',4).attr('text-anchor','end').attr('fill',d=>d.color+'bb').attr('font-size',10)
         .text(d=>d.label.length>14?d.label.slice(0,13)+'…':d.label);
+    // Nash checkmark (hidden)
+    gNodes.filter(d=>d.nodeType!=='resource').append('text')
+        .attr('x',22).attr('y',5).attr('font-size',14).attr('fill','#3fb950').attr('opacity',0)
+        .attr('class','bp-nash-check').text('✓');
 
-    // Nash check marks (hidden initially)
-    pg.selectAll('.bp-nash-check').data(players).join('text')
-        .attr('x',d=>d.x+R+6).attr('y',d=>d.y+5).attr('font-size',14)
-        .attr('fill','#3fb950').attr('opacity',0).attr('class','bp-nash-check')
-        .attr('id',d=>'bp-check-'+d.id.replace(/[^a-zA-Z0-9]/g,'_'))
-        .text('✓');
+    // Force simulation — players pinned left, resources pinned right, y floats
+    const sim = d3.forceSimulation(nodes)
+        .force('y', d3.forceY(d => d.y).strength(0.3))
+        .force('collide', d3.forceCollide(d => d.r + 4))
+        .force('charge', d3.forceManyBody().strength(-20))
+        .alphaDecay(0.05);
 
-    // Column headers
-    svg.append('text').attr('x',leftX).attr('y',14).attr('text-anchor','middle')
-        .attr('fill','#e7e9ea').attr('font-size',11).attr('font-weight',600).text('Players');
-    svg.append('text').attr('x',rightX).attr('y',14).attr('text-anchor','middle')
-        .attr('fill','#e7e9ea').attr('font-size',11).attr('font-weight',600).text('Resources');
+    sim.on('tick', () => {
+        gNodes.attr('transform', d => {
+            d.x = d.fx || d.x;
+            d.y = Math.max(d.r+5, Math.min(H-d.r-5, d.y));
+            return `translate(${d.x},${d.y})`;
+        });
+        // Update link positions
+        linkGroup.selectAll('.bp-link').attr('d', d => {
+            const s = nodeMap[d.source], t = nodeMap[d.target];
+            if (!s || !t) return '';
+            const sx = (s.fx||s.x) + (s.nodeType==='resource'?-14:s.r);
+            const tx = (t.fx||t.x) + (t.nodeType==='resource'?-14:-t.r);
+            const sy = s.y, ty = t.y;
+            const mx = (sx+tx)/2;
+            return `M${sx},${sy} C${mx},${sy} ${mx},${ty} ${tx},${ty}`;
+        });
+    });
+
+    // Click-to-highlight (like conflict graph)
+    gNodes.on('click', (e, d) => {
+        e.stopPropagation();
+        // Find connected node IDs
+        const connected = new Set([d.id]);
+        Object.values(bpState.edges).forEach(edge => {
+            if (edge.playerId === d.id) connected.add(edge.resourceId);
+            if (edge.resourceId === d.id) connected.add(edge.playerId);
+        });
+        // Dim non-connected
+        gNodes.attr('opacity', n => connected.has(n.id) ? 1 : 0.15);
+        linkGroup.selectAll('.bp-link').attr('opacity', l => {
+            return (l.source === d.id || l.target === d.id) ? 0.9 : 0.05;
+        });
+    });
+
+    svg.on('click', () => {
+        gNodes.attr('opacity', 1);
+        linkGroup.selectAll('.bp-link').attr('opacity', 0.6);
+    });
 
     // Store state
-    bpState = {players, resources, resourceMap, playerMap, edgeGroup, thinkGroup, svg, edges:{},
-               eventToEdgeKey:{}, demandCount:{}, satisfactionData:{}, arcGen, R};
-    resources.forEach(r => { bpState.demandCount[r.id] = 0; });
-    players.forEach(p => { bpState.satisfactionData[p.id] = {total:0, count:0}; });
+    bpState = { nodes, nodeMap, sim, svg, linkGroup, thinkGroup, gNodes,
+                edges:{}, eventToLinkIds:{}, demandCount:{}, satisfactionData:{}, arcGen };
+    nodes.filter(n=>n.nodeType==='resource').forEach(n => { bpState.demandCount[n.id] = 0; });
+    nodes.filter(n=>n.nodeType!=='resource').forEach(n => { bpState.satisfactionData[n.id] = {total:0,count:0}; });
 
-    // Replay edges up to current step
+    // Replay edges
     for (let i = 0; i < animState.stepIdx; i++) {
-        const s = animState.steps[i];
-        bpAddEventEdge(s.event_id, s.timeslot, 'bp-active');
+        bpAddEventEdge(animState.steps[i].event_id, animState.steps[i].timeslot, '#8b949e');
     }
     bpUpdateDemandHeatmap();
     bpHighlightConflicts();
 }
 
-function bpAddEventEdge(eventId, tsStr, cssClass) {
+function bpAddEventEdge(eventId, tsStr, defaultColor) {
     const info = animState.eventInfo?.[eventId];
     if (!info) return;
-    const courseColor = animState.colorScale?.(info.course_name||'') || '#8b949e';
+    const courseColor = animState.colorScale?.(info.course_name||'') || defaultColor || '#8b949e';
     bpRemoveEventEdges(eventId);
-    bpState.eventToEdgeKey[eventId] = [];
+    bpState.eventToLinkIds[eventId] = [];
 
-    const draw = (key, pid) => {
-        const p = bpState.playerMap?.[pid], r = bpState.resourceMap?.[tsStr];
-        if (!p || !r || !bpState.edgeGroup) return;
-        const jitter = (key.charCodeAt(key.length-1)%7-3)*1.5;
-        const mx = (p.x+r.x)/2;
-        const line = bpState.edgeGroup.append('path')
-            .attr('d',`M${p.x+bpState.R},${p.y} C${mx},${p.y+jitter} ${mx},${r.y+jitter} ${r.x-12},${r.y}`)
-            .attr('class',`bp-edge ${cssClass}`).attr('stroke',courseColor).attr('opacity',0)
-            .attr('id','bp-edge-'+key.replace(/[^a-zA-Z0-9]/g,'_'));
-        line.transition().duration(200).attr('opacity',0.7);
-        bpState.edges[key] = {line, playerId:pid, resourceId:tsStr};
-        bpState.eventToEdgeKey[eventId].push(key);
+    const addLink = (pid) => {
+        if (!bpState.nodeMap[pid] || !bpState.nodeMap[tsStr]) return;
+        const linkId = `${eventId}__${pid}`;
+        const path = bpState.linkGroup.append('path')
+            .attr('class','bp-link').attr('stroke',courseColor).attr('stroke-width',2)
+            .attr('fill','none').attr('opacity',0).attr('data-lid',linkId);
+        path.transition().duration(200).attr('opacity',0.6);
+        bpState.edges[linkId] = {path, playerId:pid, resourceId:tsStr};
+        bpState.eventToLinkIds[eventId].push(linkId);
     };
 
-    draw(`${eventId}__T`, info.teacher_id);
-    (info.student_group_ids||[]).forEach((gid,i) => draw(`${eventId}__G${i}`, gid));
+    addLink(info.teacher_id);
+    (info.student_group_ids||[]).forEach(gid => addLink(gid));
 
-    // Update demand count
     bpState.demandCount[tsStr] = (bpState.demandCount[tsStr]||0) + 1;
+
+    // Trigger tick to redraw link positions
+    if (bpState.sim) bpState.sim.alpha(0.1).restart();
 }
 
-function bpRemoveEdge(k) {
-    const e = bpState.edges[k];
-    if (e) { e.line.transition().duration(150).attr('opacity',0).remove(); delete bpState.edges[k]; }
+function bpRemoveEdge(linkId) {
+    const e = bpState.edges[linkId];
+    if (e) { e.path.transition().duration(150).attr('opacity',0).remove(); delete bpState.edges[linkId]; }
 }
 function bpRemoveEventEdges(eid) {
-    (bpState.eventToEdgeKey[eid]||[]).forEach(k => {
-        const e = bpState.edges[k];
+    (bpState.eventToLinkIds[eid]||[]).forEach(lid => {
+        const e = bpState.edges[lid];
         if (e) bpState.demandCount[e.resourceId] = Math.max(0,(bpState.demandCount[e.resourceId]||1)-1);
-        bpRemoveEdge(k);
+        bpRemoveEdge(lid);
     });
-    bpState.eventToEdgeKey[eid] = [];
+    bpState.eventToLinkIds[eid] = [];
 }
 
-// (E) Resource pressure heatmap
+// (E) Heatmap
 function bpUpdateDemandHeatmap() {
     if (!bpState.svg) return;
-    const maxDemand = Math.max(1, ...Object.values(bpState.demandCount));
-    bpState.resources.forEach(r => {
-        const demand = bpState.demandCount[r.id] || 0;
-        const intensity = demand / maxDemand;
-        // Color: cool (blue-grey) to hot (orange-red)
-        const hue = 220 - intensity * 200; // 220=blue to 20=orange
-        const sat = 20 + intensity * 60;
-        const resId = 'bp-res-' + r.id.replace(/[^a-zA-Z0-9]/g,'_');
-        bpState.svg.select('#'+resId).attr('fill', `hsl(${hue},${sat}%,${15+intensity*10}%)`);
-        // Demand bar
-        const barId = 'bp-demand-' + r.id.replace(/[^a-zA-Z0-9]/g,'_');
-        bpState.svg.select('#'+barId).transition().duration(200)
-            .attr('width', intensity*20).attr('fill', `hsl(${hue},${sat+20}%,50%)`);
+    const maxD = Math.max(1, ...Object.values(bpState.demandCount));
+    bpState.gNodes?.filter(d=>d.nodeType==='resource').select('.bp-resource-rect').each(function(d) {
+        const intensity = (bpState.demandCount[d.id]||0) / maxD;
+        const hue = 220-intensity*200, sat = 20+intensity*60;
+        d3.select(this).transition().duration(200).attr('fill',`hsl(${hue},${sat}%,${15+intensity*10}%)`);
+    });
+    bpState.gNodes?.filter(d=>d.nodeType==='resource').select('.bp-demand-bar').each(function(d) {
+        const intensity = (bpState.demandCount[d.id]||0) / maxD;
+        d3.select(this).transition().duration(200).attr('width',intensity*24);
     });
 }
 
-// (C) Update satisfaction arc for a player
-function bpUpdateSatisfaction(playerId, payoff) {
-    if (!bpState.svg || !bpState.satisfactionData[playerId]) return;
-    const sd = bpState.satisfactionData[playerId];
-    sd.total += Math.max(0, payoff);
-    sd.count += 1;
-    const avg = sd.count > 0 ? sd.total / sd.count : 0;
-    // Normalize: payoff of 0.5 = neutral, map to 0-1 arc
-    const fraction = Math.min(1, Math.max(0, avg * 2)); // 0.5 -> 1.0
-    const endAngle = fraction * Math.PI * 2;
-    const arcId = 'bp-sat-' + playerId.replace(/[^a-zA-Z0-9]/g,'_');
-    bpState.svg.select('#'+arcId).transition().duration(300)
+// (C) Satisfaction
+function bpUpdateSatisfaction(pid, payoff) {
+    if (!bpState.satisfactionData[pid]) return;
+    const sd = bpState.satisfactionData[pid];
+    sd.total += Math.max(0, payoff); sd.count += 1;
+    const frac = Math.min(1, Math.max(0, (sd.total/sd.count)*2));
+    bpState.gNodes?.filter(d=>d.id===pid).select('.bp-sat-arc')
+        .transition().duration(300)
         .attrTween('d', function() {
             const prev = d3.select(this).attr('d');
-            return d3.interpolate(prev, bpState.arcGen({endAngle}));
+            return d3.interpolate(prev, bpState.arcGen({endAngle:frac*Math.PI*2}));
         });
 }
 
-// (A) Show "thinking" — ghost edges to all candidate timeslots with payoff colors
+// (A) Thinking
 function bpShowThinking(step) {
     if (!bpState.thinkGroup || !step.alternatives?.length) return;
     bpState.thinkGroup.selectAll('*').remove();
-
     const info = animState.eventInfo?.[step.event_id];
     if (!info) return;
-
-    // Get player positions for this event's teacher
-    const player = bpState.playerMap?.[info.teacher_id];
+    const player = bpState.nodeMap[info.teacher_id];
     if (!player) return;
-
-    const maxPayoff = Math.max(...step.alternatives.map(a=>a.payoff), 0.001);
-    const minPayoff = Math.min(...step.alternatives.map(a=>a.payoff));
-    const range = maxPayoff - minPayoff || 1;
+    const maxP = Math.max(...step.alternatives.map(a=>a.payoff),0.001);
+    const minP = Math.min(...step.alternatives.map(a=>a.payoff));
+    const range = maxP-minP||1;
 
     step.alternatives.forEach(alt => {
-        const r = bpState.resourceMap?.[alt.timeslot];
+        const r = bpState.nodeMap[alt.timeslot];
         if (!r) return;
-        const norm = (alt.payoff - minPayoff) / range; // 0-1
-        const color = alt.conflicts > 0 ? '#f85149' : `hsl(${120*norm},70%,50%)`; // red if conflict, green scale otherwise
-        const mx = (player.x+r.x)/2;
-        // Ghost edge
+        const norm = (alt.payoff-minP)/range;
+        const color = alt.conflicts>0?'#f85149':`hsl(${120*norm},70%,50%)`;
+        const px = player.fx||player.x, py = player.y, rx = r.fx||r.x, ry = r.y;
+        const mx = (px+rx)/2;
         bpState.thinkGroup.append('path')
-            .attr('d',`M${player.x+bpState.R},${player.y} C${mx},${player.y} ${mx},${r.y} ${r.x-12},${r.y}`)
+            .attr('d',`M${px+16},${py} C${mx},${py} ${mx},${ry} ${rx-14},${ry}`)
             .attr('stroke',color).attr('stroke-width',1.5).attr('stroke-dasharray','4 3')
-            .attr('opacity',0.4+norm*0.4).attr('fill','none');
-        // Payoff label near resource
+            .attr('opacity',0.3+norm*0.5).attr('fill','none');
         bpState.thinkGroup.append('text')
-            .attr('x',r.x-18).attr('y',r.y-2).attr('text-anchor','end')
-            .attr('fill',color).attr('font-size',9).attr('font-weight',600)
-            .text(alt.payoff.toFixed(1));
+            .attr('x',rx-20).attr('y',ry-3).attr('text-anchor','end')
+            .attr('fill',color).attr('font-size',9).attr('font-weight',600).text(alt.payoff.toFixed(1));
     });
 
-    // Highlight active player
-    const playerId = 'bp-player-' + info.teacher_id.replace(/[^a-zA-Z0-9]/g,'_');
-    bpState.svg.select('#'+playerId).attr('filter','url(#glow)').attr('stroke-width',3);
+    // Glow active player
+    bpState.gNodes?.filter(d=>d.id===info.teacher_id).select('.bp-player-circle')
+        .attr('filter','url(#glow)').attr('stroke-width',3);
 }
 
 function bpClearThinking() {
     if (bpState.thinkGroup) bpState.thinkGroup.selectAll('*').remove();
-    // Remove glow from all players
-    if (bpState.svg) bpState.svg.selectAll('.bp-player-circle').attr('filter',null).attr('stroke-width',2);
+    bpState.gNodes?.filter(d=>d.nodeType!=='resource').select('.bp-player-circle')
+        .attr('filter',null).attr('stroke-width',2);
 }
 
 function bpHighlightConflicts() {
     if (!bpState.svg) return;
-    bpState.svg.selectAll('.bp-resource').attr('stroke','#30363d').attr('stroke-width',1.5).classed('bp-resource-conflict',false);
+    bpState.gNodes?.filter(d=>d.nodeType==='resource').select('.bp-resource-rect')
+        .attr('stroke','#30363d').attr('stroke-width',1.5);
 
     const prCount = {};
     Object.entries(bpState.edges).forEach(([k,e]) => {
         const pk = e.playerId+'|'+e.resourceId;
         (prCount[pk]=prCount[pk]||[]).push(k);
     });
-    Object.entries(prCount).forEach(([pk, keys]) => {
+    Object.entries(prCount).forEach(([pk,keys]) => {
         if (keys.length >= 2) {
             const rid = pk.split('|')[1];
-            const resId = 'bp-res-'+rid.replace(/[^a-zA-Z0-9]/g,'_');
-            bpState.svg.select('#'+resId).attr('stroke','#f85149').attr('stroke-width',2.5).classed('bp-resource-conflict',true);
+            bpState.gNodes?.filter(d=>d.id===rid).select('.bp-resource-rect')
+                .attr('stroke','#f85149').attr('stroke-width',2.5);
             keys.forEach(k => {
-                bpState.svg.select('#bp-edge-'+k.replace(/[^a-zA-Z0-9]/g,'_'))
-                    .attr('class','bp-edge bp-conflict').attr('stroke','#f85149').attr('opacity',1);
+                bpState.linkGroup?.select(`[data-lid="${k}"]`)
+                    .attr('stroke','#f85149').attr('opacity',1).attr('stroke-width',2.5);
             });
         }
     });
 }
 
-// Main animation step for bipartite
 function bpAnimStep(step) {
     if (!bpState.svg) return;
     const info = animState.eventInfo?.[step.event_id];
-
-    // (A) Show thinking briefly, then place
     bpShowThinking(step);
-
-    const delay = 150;
     setTimeout(() => {
         bpClearThinking();
-
         if (step.old_timeslot) {
-            const oldKeys = bpState.eventToEdgeKey[step.event_id]||[];
-            oldKeys.forEach(k => {
-                bpState.svg.select('#bp-edge-'+k.replace(/[^a-zA-Z0-9]/g,'_'))
-                    .attr('class','bp-edge bp-moving').attr('stroke','#d29922').attr('stroke-dasharray','6 3');
+            (bpState.eventToLinkIds[step.event_id]||[]).forEach(lid => {
+                bpState.linkGroup?.select(`[data-lid="${lid}"]`)
+                    .attr('stroke','#d29922').attr('stroke-dasharray','6 3');
             });
             setTimeout(() => {
                 bpRemoveEventEdges(step.event_id);
-                bpAddEventEdge(step.event_id, step.timeslot, 'bp-active');
-                bpUpdateDemandHeatmap();
-                bpHighlightConflicts();
+                bpAddEventEdge(step.event_id, step.timeslot);
+                bpUpdateDemandHeatmap(); bpHighlightConflicts();
             }, 150);
         } else {
-            bpAddEventEdge(step.event_id, step.timeslot, 'bp-active');
-            bpUpdateDemandHeatmap();
-            bpHighlightConflicts();
+            bpAddEventEdge(step.event_id, step.timeslot);
+            bpUpdateDemandHeatmap(); bpHighlightConflicts();
         }
-
-        // (C) Update satisfaction for involved stakeholders
         if (info) {
             bpUpdateSatisfaction(info.teacher_id, step.payoff);
             (info.student_group_ids||[]).forEach(gid => bpUpdateSatisfaction(gid, step.payoff));
         }
-    }, delay);
+    }, 150);
 }
 
-// (D) Nash equilibrium sweep — checkmarks cascade across all players
 function bpNashSweep() {
-    if (!bpState.svg) return;
-    bpState.players.forEach((p, i) => {
-        const checkId = 'bp-check-' + p.id.replace(/[^a-zA-Z0-9]/g,'_');
-        bpState.svg.select('#'+checkId)
-            .transition().delay(i*80).duration(200).attr('opacity',1);
-        // Brief glow on player
-        const playerId = 'bp-player-' + p.id.replace(/[^a-zA-Z0-9]/g,'_');
-        bpState.svg.select('#'+playerId)
-            .transition().delay(i*80).duration(150).attr('stroke-width',3)
+    if (!bpState.gNodes) return;
+    bpState.gNodes.filter(d=>d.nodeType!=='resource').select('.bp-nash-check').each(function(d, i) {
+        d3.select(this).transition().delay(i*80).duration(200).attr('opacity',1);
+    });
+    bpState.gNodes.filter(d=>d.nodeType!=='resource').select('.bp-player-circle').each(function(d, i) {
+        d3.select(this).transition().delay(i*80).duration(150).attr('stroke-width',3)
             .transition().duration(300).attr('stroke-width',2);
     });
 }
 
 function bpReset() {
-    if (bpState.edgeGroup) bpState.edgeGroup.selectAll('*').remove();
+    if (bpState.linkGroup) bpState.linkGroup.selectAll('*').remove();
     if (bpState.thinkGroup) bpState.thinkGroup.selectAll('*').remove();
-    bpState.edges = {};
-    bpState.eventToEdgeKey = {};
-    if (bpState.svg) {
-        bpState.svg.selectAll('.bp-resource').attr('stroke','#30363d').attr('stroke-width',1.5).classed('bp-resource-conflict',false);
-        bpState.svg.selectAll('.bp-nash-check').attr('opacity',0);
-        bpState.svg.selectAll('.bp-demand-bar').attr('width',0);
-        bpState.svg.selectAll('.bp-sat-arc').attr('d', bpState.arcGen?.({endAngle:0}) || '');
-        bpState.svg.selectAll('.bp-player-circle').attr('filter',null).attr('stroke-width',2);
+    bpState.edges = {}; bpState.eventToLinkIds = {};
+    if (bpState.gNodes) {
+        bpState.gNodes.filter(d=>d.nodeType==='resource').select('.bp-resource-rect')
+            .attr('stroke','#30363d').attr('stroke-width',1.5).attr('fill','#1a1f2e');
+        bpState.gNodes.filter(d=>d.nodeType==='resource').select('.bp-demand-bar').attr('width',0);
+        bpState.gNodes.filter(d=>d.nodeType!=='resource').select('.bp-nash-check').attr('opacity',0);
+        bpState.gNodes.filter(d=>d.nodeType!=='resource').select('.bp-sat-arc')
+            .attr('d', bpState.arcGen?.({endAngle:0})||'');
+        bpState.gNodes.filter(d=>d.nodeType!=='resource').select('.bp-player-circle')
+            .attr('filter',null).attr('stroke-width',2);
     }
-    bpState.resources?.forEach(r => { bpState.demandCount[r.id] = 0; });
-    bpState.players?.forEach(p => { bpState.satisfactionData[p.id] = {total:0,count:0}; });
+    bpState.nodes?.filter(n=>n.nodeType==='resource').forEach(n=>{bpState.demandCount[n.id]=0;});
+    bpState.nodes?.filter(n=>n.nodeType!=='resource').forEach(n=>{bpState.satisfactionData[n.id]={total:0,count:0};});
+    // Reset opacity in case click-highlight was active
+    bpState.gNodes?.attr('opacity',1);
+    bpState.linkGroup?.selectAll('.bp-link').attr('opacity',0.6);
 }
 
 // ─── Timetable Grid ─────────────────────────────────────────────────────────
