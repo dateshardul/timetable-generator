@@ -28,6 +28,10 @@ class SolverStep:
     conflicts_before: int = 0
     conflicts_after: int = 0
     reason: str = ""
+    # Alternatives considered: [{timeslot: str, payoff: float, conflicts: int}]
+    alternatives: list[dict] = field(default_factory=list)
+    # Payoff achieved by chosen timeslot
+    payoff: float = 0.0
 
 
 @dataclass
@@ -70,6 +74,8 @@ class Timetable:
                     "conflicts_before": s.conflicts_before,
                     "conflicts_after": s.conflicts_after,
                     "reason": s.reason,
+                    "payoff": round(s.payoff, 4),
+                    "alternatives": s.alternatives[:5],  # top 5 alternatives
                 }
                 for s in self.steps
             ],

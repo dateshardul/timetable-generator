@@ -803,11 +803,13 @@ function animStep() {
         animPause();
         document.getElementById('anim-narration').innerHTML =
             '<span style="color:#3fb950;">&#10003; Nash Equilibrium reached! No player can improve by switching.</span>';
-        // Mark all players as settled
+        // Mark all player cards as settled
         document.querySelectorAll('.player-card').forEach(c => {
             c.classList.remove('pc-moving','pc-conflict');
             if (c.classList.contains('pc-placed')) c.classList.replace('pc-placed','pc-settled');
         });
+        // (D) Nash sweep on bipartite graph
+        bpNashSweep();
         return;
     }
 
@@ -1011,16 +1013,16 @@ document.querySelectorAll('.main-view-btn').forEach(btn => {
     });
 });
 
-// ─── Bipartite Stakeholder-Resource Graph ───────────────────────────────────
-// Players = Teachers + Student Groups (real people)
-// Resources = Timeslots (what they compete for)
-// Edges = event assignments, colored by course
-let bpState = { players:[], resources:[], edges:{}, svg:null, resourceMap:{}, eventToEdgeKey:{} };
+// ─── Enhanced Bipartite Stakeholder-Resource Graph ──────────────────────────
+// Players (left) = Teachers + Student Groups with satisfaction arcs
+// Resources (right) = Timeslots with demand heatmap
+// Features: A=thinking viz, C=satisfaction meters, D=Nash sweep, E=pressure heatmap
+let bpState = { players:[], resources:[], edges:{}, svg:null, resourceMap:{}, playerMap:{},
+                eventToEdgeKey:{}, edgeGroup:null, thinkGroup:null, demandCount:{}, satisfactionData:{} };
 
 function renderBipartite() {
     if (!state.result || !state.inputData) return;
-    const wrap = document.getElementById('bipartite-wrap');
-    wrap.style.display = '';
+    document.getElementById('bipartite-wrap').style.display = '';
     const svgEl = document.getElementById('bipartite-svg');
     const svg = d3.select(svgEl);
     svg.selectAll('*').remove();
@@ -1034,228 +1036,331 @@ function renderBipartite() {
     const colorScale = animState.colorScale;
     const eventInfo = animState.eventInfo || {};
 
-    // ── Build Players (left): Teachers top, Student Groups bottom ──
-    const teachers = (input.teachers || []).map(t => ({
-        id: t.teacher_id, label: t.name || t.teacher_id, type: 'teacher'
-    }));
-    const groups = (input.student_groups || []).map(g => ({
-        id: g.group_id, label: g.name || g.group_id, type: 'student_group'
-    }));
+    // Build player list
+    const teachers = (input.teachers||[]).map(t => ({id:t.teacher_id, label:t.name||t.teacher_id, type:'teacher', initials:(t.name||t.teacher_id).split(' ').map(w=>w[0]).join('').slice(0,2)}));
+    const groups = (input.student_groups||[]).map(g => ({id:g.group_id, label:g.name||g.group_id, type:'student_group', initials:(g.name||g.group_id).split(' ').map(w=>w[0]).join('').slice(0,2)}));
     const allPlayers = [...teachers, ...groups];
 
-    // ── Build Resources (right): Timeslots grouped by day ──
+    // Build resource list
     const tsSet = new Set();
     (state.result.assignments||[]).forEach(a => tsSet.add(a.timeslot));
     (animState.steps||[]).forEach(s => { tsSet.add(s.timeslot); if (s.old_timeslot) tsSet.add(s.old_timeslot); });
     const resourceIds = [...tsSet].sort();
 
     // Layout
-    const leftX = W * 0.18;
-    const rightX = W * 0.82;
-    const topPad = 35;
-    const pSpacing = Math.min(30, (H - topPad - 10) / Math.max(allPlayers.length, 1));
+    const leftX = W * 0.16;
+    const rightX = W * 0.84;
+    const topPad = 30;
+    const pSpacing = Math.min(36, (H - topPad - 10) / Math.max(allPlayers.length, 1));
     const rSpacing = Math.min(28, (H - topPad - 10) / Math.max(resourceIds.length, 1));
     const pStartY = topPad + (H - topPad - allPlayers.length * pSpacing) / 2;
     const rStartY = topPad + (H - topPad - resourceIds.length * rSpacing) / 2;
 
-    const players = allPlayers.map((p, i) => ({
-        ...p, x: leftX, y: pStartY + i * pSpacing,
-        color: p.type === 'teacher' ? '#58a6ff' : '#3fb950'
-    }));
-    const playerMap = {};
-    players.forEach(p => { playerMap[p.id] = p; });
+    const players = allPlayers.map((p, i) => ({...p, x:leftX, y:pStartY+i*pSpacing, color:p.type==='teacher'?'#58a6ff':'#3fb950'}));
+    const playerMap = {}; players.forEach(p => { playerMap[p.id] = p; });
+    const resources = resourceIds.map((rid, i) => ({id:rid, x:rightX, y:rStartY+i*rSpacing, label:rid.replace(/\s*\(.*\)/,'')}));
+    const resourceMap = {}; resources.forEach(r => { resourceMap[r.id] = r; });
 
-    const resources = resourceIds.map((rid, i) => ({
-        id: rid, x: rightX, y: rStartY + i * rSpacing,
-        label: rid.replace(/\s*\(.*\)/, '')
-    }));
-    const resourceMap = {};
-    resources.forEach(r => { resourceMap[r.id] = r; });
+    // Defs for gradients/filters
+    const defs = svg.append('defs');
+    defs.append('filter').attr('id','glow')
+        .append('feGaussianBlur').attr('stdDeviation',3).attr('result','coloredBlur');
 
-    // Divider line between teacher and group sections
-    const dividerY = teachers.length > 0 && groups.length > 0
-        ? (players[teachers.length - 1].y + players[teachers.length].y) / 2
-        : -1;
-
-    // ── Draw ──
-
-    // Column headers
-    svg.append('text').attr('x', leftX).attr('y', 18).attr('text-anchor','middle')
-        .attr('fill','#e7e9ea').attr('font-size',12).attr('font-weight',600).text('Stakeholders (Players)');
-    svg.append('text').attr('x', rightX).attr('y', 18).attr('text-anchor','middle')
-        .attr('fill','#e7e9ea').attr('font-size',12).attr('font-weight',600).text('Timeslots (Resources)');
-
-    // Section labels
-    if (teachers.length > 0) {
-        svg.append('text').attr('x', leftX).attr('y', pStartY - 8).attr('text-anchor','middle')
-            .attr('fill','#58a6ff').attr('font-size',10).attr('font-weight',600).text('Teachers');
-    }
-    if (groups.length > 0) {
-        const gStartY = players[teachers.length]?.y || pStartY;
-        svg.append('text').attr('x', leftX).attr('y', gStartY - 8).attr('text-anchor','middle')
-            .attr('fill','#3fb950').attr('font-size',10).attr('font-weight',600).text('Student Groups');
-    }
-    if (dividerY > 0) {
-        svg.append('line').attr('x1', leftX - 60).attr('x2', leftX + 60)
-            .attr('y1', dividerY).attr('y2', dividerY)
-            .attr('stroke','#30363d').attr('stroke-dasharray','4 3');
-    }
-
-    // Edge group (under nodes)
+    // ── Edge group (bottom layer) ──
     const edgeGroup = svg.append('g').attr('class','bp-edges');
+    // ── Ghost/thinking edges (above edges, below nodes) ──
+    const thinkGroup = svg.append('g').attr('class','bp-think');
 
-    // Player nodes
-    const pg = svg.append('g');
-    pg.selectAll('circle').data(players).join('circle')
-        .attr('cx', d => d.x).attr('cy', d => d.y).attr('r', 9)
-        .attr('fill', d => d.color + '33').attr('stroke', d => d.color).attr('stroke-width', 2)
-        .attr('class','bp-player');
-    pg.selectAll('text').data(players).join('text')
-        .attr('x', d => d.x - 16).attr('y', d => d.y + 4)
-        .attr('text-anchor','end').attr('fill', d => d.color).attr('font-size', 11)
-        .text(d => d.label.length > 16 ? d.label.slice(0,15)+'...' : d.label);
-
-    // Resource nodes
+    // ── Resource nodes with heatmap ──
     const rg = svg.append('g');
     rg.selectAll('rect').data(resources).join('rect')
-        .attr('x', d => d.x - 10).attr('y', d => d.y - 10).attr('width', 20).attr('height', 20)
-        .attr('rx', 4).attr('fill','#21262d').attr('stroke','#484f58').attr('stroke-width',1)
-        .attr('class','bp-resource').attr('id', d => 'bp-res-' + d.id.replace(/[^a-zA-Z0-9]/g,'_'));
+        .attr('x',d=>d.x-12).attr('y',d=>d.y-11).attr('width',24).attr('height',22)
+        .attr('rx',5).attr('fill','#1a1f2e').attr('stroke','#30363d').attr('stroke-width',1.5)
+        .attr('class','bp-resource').attr('id',d=>'bp-res-'+d.id.replace(/[^a-zA-Z0-9]/g,'_'));
+    // Resource demand indicator (small bar inside, updated during animation)
+    rg.selectAll('.bp-demand-bar').data(resources).join('rect')
+        .attr('x',d=>d.x-10).attr('y',d=>d.y+6).attr('width',0).attr('height',3)
+        .attr('rx',1.5).attr('fill','#484f58')
+        .attr('class','bp-demand-bar').attr('id',d=>'bp-demand-'+d.id.replace(/[^a-zA-Z0-9]/g,'_'));
     rg.selectAll('text').data(resources).join('text')
-        .attr('x', d => d.x + 16).attr('y', d => d.y + 4)
-        .attr('text-anchor','start').attr('fill','#8b949e').attr('font-size', 10)
-        .text(d => d.label);
+        .attr('x',d=>d.x+20).attr('y',d=>d.y+4)
+        .attr('text-anchor','start').attr('fill','#8b949e').attr('font-size',10).text(d=>d.label);
+
+    // ── Player nodes with initials and satisfaction arcs ──
+    const R = 15; // player node radius
+    const pg = svg.append('g');
+
+    // Satisfaction arc background (grey ring)
+    pg.selectAll('.bp-sat-bg').data(players).join('circle')
+        .attr('cx',d=>d.x).attr('cy',d=>d.y).attr('r',R+3)
+        .attr('fill','none').attr('stroke','#21262d').attr('stroke-width',3);
+
+    // Satisfaction arc foreground (colored, initially 0 length)
+    const arcGen = d3.arc().innerRadius(R+1.5).outerRadius(R+4.5).startAngle(0);
+    pg.selectAll('.bp-sat-arc').data(players).join('path')
+        .attr('transform',d=>`translate(${d.x},${d.y})`)
+        .attr('d', arcGen({endAngle:0}))
+        .attr('fill',d=>d.color)
+        .attr('class','bp-sat-arc').attr('id',d=>'bp-sat-'+d.id.replace(/[^a-zA-Z0-9]/g,'_'));
+
+    // Player circle
+    pg.selectAll('.bp-player-circle').data(players).join('circle')
+        .attr('cx',d=>d.x).attr('cy',d=>d.y).attr('r',R)
+        .attr('fill',d=>d.color+'22').attr('stroke',d=>d.color).attr('stroke-width',2)
+        .attr('class','bp-player-circle').attr('id',d=>'bp-player-'+d.id.replace(/[^a-zA-Z0-9]/g,'_'));
+
+    // Initials inside circle
+    pg.selectAll('.bp-initials').data(players).join('text')
+        .attr('x',d=>d.x).attr('y',d=>d.y+4).attr('text-anchor','middle')
+        .attr('fill',d=>d.color).attr('font-size',11).attr('font-weight',700)
+        .text(d=>d.initials);
+
+    // Name label
+    pg.selectAll('.bp-name').data(players).join('text')
+        .attr('x',d=>d.x-R-8).attr('y',d=>d.y+4).attr('text-anchor','end')
+        .attr('fill',d=>d.color+'bb').attr('font-size',10)
+        .text(d=>d.label.length>14?d.label.slice(0,13)+'…':d.label);
+
+    // Nash check marks (hidden initially)
+    pg.selectAll('.bp-nash-check').data(players).join('text')
+        .attr('x',d=>d.x+R+6).attr('y',d=>d.y+5).attr('font-size',14)
+        .attr('fill','#3fb950').attr('opacity',0).attr('class','bp-nash-check')
+        .attr('id',d=>'bp-check-'+d.id.replace(/[^a-zA-Z0-9]/g,'_'))
+        .text('✓');
+
+    // Column headers
+    svg.append('text').attr('x',leftX).attr('y',14).attr('text-anchor','middle')
+        .attr('fill','#e7e9ea').attr('font-size',11).attr('font-weight',600).text('Players');
+    svg.append('text').attr('x',rightX).attr('y',14).attr('text-anchor','middle')
+        .attr('fill','#e7e9ea').attr('font-size',11).attr('font-weight',600).text('Resources');
 
     // Store state
-    bpState = { players, resources, resourceMap, playerMap, edgeGroup, svg, edges:{}, eventToEdgeKey:{} };
+    bpState = {players, resources, resourceMap, playerMap, edgeGroup, thinkGroup, svg, edges:{},
+               eventToEdgeKey:{}, demandCount:{}, satisfactionData:{}, arcGen, R};
+    resources.forEach(r => { bpState.demandCount[r.id] = 0; });
+    players.forEach(p => { bpState.satisfactionData[p.id] = {total:0, count:0}; });
 
-    // Replay edges up to current animation step
-    const currentAssignments = {};
+    // Replay edges up to current step
     for (let i = 0; i < animState.stepIdx; i++) {
-        currentAssignments[animState.steps[i].event_id] = animState.steps[i].timeslot;
+        const s = animState.steps[i];
+        bpAddEventEdge(s.event_id, s.timeslot, 'bp-active');
     }
-    Object.entries(currentAssignments).forEach(([eid, tsStr]) => {
-        bpAddEventEdge(eid, tsStr, 'bp-active');
-    });
+    bpUpdateDemandHeatmap();
     bpHighlightConflicts();
 }
 
-function bpAddEventEdge(eventId, timeslotStr, cssClass) {
-    // An event connects its teacher AND student groups to the timeslot
+function bpAddEventEdge(eventId, tsStr, cssClass) {
     const info = animState.eventInfo?.[eventId];
     if (!info) return;
-    const courseName = info.course_name || '';
-    const courseColor = animState.colorScale?.(courseName) || '#8b949e';
+    const courseColor = animState.colorScale?.(info.course_name||'') || '#8b949e';
+    bpRemoveEventEdges(eventId);
+    bpState.eventToEdgeKey[eventId] = [];
 
-    // Teacher → Timeslot edge
-    const tKey = `${eventId}__T`;
-    bpRemoveEdge(tKey);
-    bpDrawEdge(tKey, info.teacher_id, timeslotStr, courseColor, cssClass, courseName);
-    bpState.eventToEdgeKey[eventId] = bpState.eventToEdgeKey[eventId] || [];
-    bpState.eventToEdgeKey[eventId].push(tKey);
+    const draw = (key, pid) => {
+        const p = bpState.playerMap?.[pid], r = bpState.resourceMap?.[tsStr];
+        if (!p || !r || !bpState.edgeGroup) return;
+        const jitter = (key.charCodeAt(key.length-1)%7-3)*1.5;
+        const mx = (p.x+r.x)/2;
+        const line = bpState.edgeGroup.append('path')
+            .attr('d',`M${p.x+bpState.R},${p.y} C${mx},${p.y+jitter} ${mx},${r.y+jitter} ${r.x-12},${r.y}`)
+            .attr('class',`bp-edge ${cssClass}`).attr('stroke',courseColor).attr('opacity',0)
+            .attr('id','bp-edge-'+key.replace(/[^a-zA-Z0-9]/g,'_'));
+        line.transition().duration(200).attr('opacity',0.7);
+        bpState.edges[key] = {line, playerId:pid, resourceId:tsStr};
+        bpState.eventToEdgeKey[eventId].push(key);
+    };
 
-    // Student group → Timeslot edges
-    (info.student_group_ids || []).forEach((gid, gi) => {
-        const gKey = `${eventId}__G${gi}`;
-        bpRemoveEdge(gKey);
-        bpDrawEdge(gKey, gid, timeslotStr, courseColor, cssClass, courseName);
-        bpState.eventToEdgeKey[eventId].push(gKey);
+    draw(`${eventId}__T`, info.teacher_id);
+    (info.student_group_ids||[]).forEach((gid,i) => draw(`${eventId}__G${i}`, gid));
+
+    // Update demand count
+    bpState.demandCount[tsStr] = (bpState.demandCount[tsStr]||0) + 1;
+}
+
+function bpRemoveEdge(k) {
+    const e = bpState.edges[k];
+    if (e) { e.line.transition().duration(150).attr('opacity',0).remove(); delete bpState.edges[k]; }
+}
+function bpRemoveEventEdges(eid) {
+    (bpState.eventToEdgeKey[eid]||[]).forEach(k => {
+        const e = bpState.edges[k];
+        if (e) bpState.demandCount[e.resourceId] = Math.max(0,(bpState.demandCount[e.resourceId]||1)-1);
+        bpRemoveEdge(k);
+    });
+    bpState.eventToEdgeKey[eid] = [];
+}
+
+// (E) Resource pressure heatmap
+function bpUpdateDemandHeatmap() {
+    if (!bpState.svg) return;
+    const maxDemand = Math.max(1, ...Object.values(bpState.demandCount));
+    bpState.resources.forEach(r => {
+        const demand = bpState.demandCount[r.id] || 0;
+        const intensity = demand / maxDemand;
+        // Color: cool (blue-grey) to hot (orange-red)
+        const hue = 220 - intensity * 200; // 220=blue to 20=orange
+        const sat = 20 + intensity * 60;
+        const resId = 'bp-res-' + r.id.replace(/[^a-zA-Z0-9]/g,'_');
+        bpState.svg.select('#'+resId).attr('fill', `hsl(${hue},${sat}%,${15+intensity*10}%)`);
+        // Demand bar
+        const barId = 'bp-demand-' + r.id.replace(/[^a-zA-Z0-9]/g,'_');
+        bpState.svg.select('#'+barId).transition().duration(200)
+            .attr('width', intensity*20).attr('fill', `hsl(${hue},${sat+20}%,50%)`);
     });
 }
 
-function bpDrawEdge(edgeKey, playerId, resourceId, color, cssClass, courseLabel) {
-    const player = bpState.playerMap?.[playerId];
-    const resource = bpState.resourceMap?.[resourceId];
-    if (!player || !resource || !bpState.edgeGroup) return;
-
-    const midX = (player.x + resource.x) / 2;
-    // Slight vertical jitter based on edgeKey to prevent overlap
-    const jitter = (edgeKey.charCodeAt(edgeKey.length-1) % 7 - 3) * 1.5;
-    const line = bpState.edgeGroup.append('path')
-        .attr('d', `M${player.x+9},${player.y} C${midX},${player.y+jitter} ${midX},${resource.y+jitter} ${resource.x-10},${resource.y}`)
-        .attr('class', `bp-edge ${cssClass}`)
-        .attr('stroke', color)
-        .attr('id', 'bp-edge-' + edgeKey.replace(/[^a-zA-Z0-9]/g,'_'));
-
-    bpState.edges[edgeKey] = { line, playerId, resourceId };
+// (C) Update satisfaction arc for a player
+function bpUpdateSatisfaction(playerId, payoff) {
+    if (!bpState.svg || !bpState.satisfactionData[playerId]) return;
+    const sd = bpState.satisfactionData[playerId];
+    sd.total += Math.max(0, payoff);
+    sd.count += 1;
+    const avg = sd.count > 0 ? sd.total / sd.count : 0;
+    // Normalize: payoff of 0.5 = neutral, map to 0-1 arc
+    const fraction = Math.min(1, Math.max(0, avg * 2)); // 0.5 -> 1.0
+    const endAngle = fraction * Math.PI * 2;
+    const arcId = 'bp-sat-' + playerId.replace(/[^a-zA-Z0-9]/g,'_');
+    bpState.svg.select('#'+arcId).transition().duration(300)
+        .attrTween('d', function() {
+            const prev = d3.select(this).attr('d');
+            return d3.interpolate(prev, bpState.arcGen({endAngle}));
+        });
 }
 
-function bpRemoveEdge(edgeKey) {
-    const existing = bpState.edges[edgeKey];
-    if (existing) {
-        existing.line.transition().duration(200).attr('opacity', 0).remove();
-        delete bpState.edges[edgeKey];
-    }
+// (A) Show "thinking" — ghost edges to all candidate timeslots with payoff colors
+function bpShowThinking(step) {
+    if (!bpState.thinkGroup || !step.alternatives?.length) return;
+    bpState.thinkGroup.selectAll('*').remove();
+
+    const info = animState.eventInfo?.[step.event_id];
+    if (!info) return;
+
+    // Get player positions for this event's teacher
+    const player = bpState.playerMap?.[info.teacher_id];
+    if (!player) return;
+
+    const maxPayoff = Math.max(...step.alternatives.map(a=>a.payoff), 0.001);
+    const minPayoff = Math.min(...step.alternatives.map(a=>a.payoff));
+    const range = maxPayoff - minPayoff || 1;
+
+    step.alternatives.forEach(alt => {
+        const r = bpState.resourceMap?.[alt.timeslot];
+        if (!r) return;
+        const norm = (alt.payoff - minPayoff) / range; // 0-1
+        const color = alt.conflicts > 0 ? '#f85149' : `hsl(${120*norm},70%,50%)`; // red if conflict, green scale otherwise
+        const mx = (player.x+r.x)/2;
+        // Ghost edge
+        bpState.thinkGroup.append('path')
+            .attr('d',`M${player.x+bpState.R},${player.y} C${mx},${player.y} ${mx},${r.y} ${r.x-12},${r.y}`)
+            .attr('stroke',color).attr('stroke-width',1.5).attr('stroke-dasharray','4 3')
+            .attr('opacity',0.4+norm*0.4).attr('fill','none');
+        // Payoff label near resource
+        bpState.thinkGroup.append('text')
+            .attr('x',r.x-18).attr('y',r.y-2).attr('text-anchor','end')
+            .attr('fill',color).attr('font-size',9).attr('font-weight',600)
+            .text(alt.payoff.toFixed(1));
+    });
+
+    // Highlight active player
+    const playerId = 'bp-player-' + info.teacher_id.replace(/[^a-zA-Z0-9]/g,'_');
+    bpState.svg.select('#'+playerId).attr('filter','url(#glow)').attr('stroke-width',3);
 }
 
-function bpRemoveEventEdges(eventId) {
-    const keys = bpState.eventToEdgeKey[eventId] || [];
-    keys.forEach(k => bpRemoveEdge(k));
-    bpState.eventToEdgeKey[eventId] = [];
+function bpClearThinking() {
+    if (bpState.thinkGroup) bpState.thinkGroup.selectAll('*').remove();
+    // Remove glow from all players
+    if (bpState.svg) bpState.svg.selectAll('.bp-player-circle').attr('filter',null).attr('stroke-width',2);
 }
 
 function bpHighlightConflicts() {
     if (!bpState.svg) return;
-    // Reset resource highlights
-    bpState.svg.selectAll('.bp-resource').attr('stroke','#484f58').attr('stroke-width',1).classed('bp-resource-conflict',false);
-    // Reset edge conflict class
-    bpState.svg.selectAll('.bp-edge.bp-conflict').each(function() {
-        // Restore to active
-        d3.select(this).attr('class', 'bp-edge bp-active');
-    });
+    bpState.svg.selectAll('.bp-resource').attr('stroke','#30363d').attr('stroke-width',1.5).classed('bp-resource-conflict',false);
 
-    // Find players with multiple edges to the same resource (= conflict)
-    // Group edges by (playerId, resourceId)
-    const playerResourceCount = {}; // "playerId|resourceId" -> [edgeKeys]
-    Object.entries(bpState.edges).forEach(([key, e]) => {
-        const prKey = e.playerId + '|' + e.resourceId;
-        (playerResourceCount[prKey] = playerResourceCount[prKey] || []).push(key);
+    const prCount = {};
+    Object.entries(bpState.edges).forEach(([k,e]) => {
+        const pk = e.playerId+'|'+e.resourceId;
+        (prCount[pk]=prCount[pk]||[]).push(k);
     });
-
-    Object.entries(playerResourceCount).forEach(([prKey, edgeKeys]) => {
-        if (edgeKeys.length >= 2) {
-            // This player has 2+ events at the same timeslot = conflict!
-            const resourceId = prKey.split('|')[1];
-            const resId = 'bp-res-' + resourceId.replace(/[^a-zA-Z0-9]/g,'_');
-            bpState.svg.select('#' + resId)
-                .attr('stroke','#f85149').attr('stroke-width',2.5)
-                .classed('bp-resource-conflict', true);
-            edgeKeys.forEach(k => {
-                const sel = '#bp-edge-' + k.replace(/[^a-zA-Z0-9]/g,'_');
-                bpState.svg.select(sel).attr('class','bp-edge bp-conflict').attr('stroke','#f85149');
+    Object.entries(prCount).forEach(([pk, keys]) => {
+        if (keys.length >= 2) {
+            const rid = pk.split('|')[1];
+            const resId = 'bp-res-'+rid.replace(/[^a-zA-Z0-9]/g,'_');
+            bpState.svg.select('#'+resId).attr('stroke','#f85149').attr('stroke-width',2.5).classed('bp-resource-conflict',true);
+            keys.forEach(k => {
+                bpState.svg.select('#bp-edge-'+k.replace(/[^a-zA-Z0-9]/g,'_'))
+                    .attr('class','bp-edge bp-conflict').attr('stroke','#f85149').attr('opacity',1);
             });
         }
     });
 }
 
+// Main animation step for bipartite
 function bpAnimStep(step) {
     if (!bpState.svg) return;
+    const info = animState.eventInfo?.[step.event_id];
 
-    if (step.old_timeslot) {
-        // Mark old edges as moving, then remove and redraw
-        const oldKeys = bpState.eventToEdgeKey[step.event_id] || [];
-        oldKeys.forEach(k => {
-            const sel = '#bp-edge-' + k.replace(/[^a-zA-Z0-9]/g,'_');
-            bpState.svg.select(sel).attr('class','bp-edge bp-moving').attr('stroke','#d29922');
-        });
-        setTimeout(() => {
-            bpRemoveEventEdges(step.event_id);
+    // (A) Show thinking briefly, then place
+    bpShowThinking(step);
+
+    const delay = 150;
+    setTimeout(() => {
+        bpClearThinking();
+
+        if (step.old_timeslot) {
+            const oldKeys = bpState.eventToEdgeKey[step.event_id]||[];
+            oldKeys.forEach(k => {
+                bpState.svg.select('#bp-edge-'+k.replace(/[^a-zA-Z0-9]/g,'_'))
+                    .attr('class','bp-edge bp-moving').attr('stroke','#d29922').attr('stroke-dasharray','6 3');
+            });
+            setTimeout(() => {
+                bpRemoveEventEdges(step.event_id);
+                bpAddEventEdge(step.event_id, step.timeslot, 'bp-active');
+                bpUpdateDemandHeatmap();
+                bpHighlightConflicts();
+            }, 150);
+        } else {
             bpAddEventEdge(step.event_id, step.timeslot, 'bp-active');
+            bpUpdateDemandHeatmap();
             bpHighlightConflicts();
-        }, 250);
-    } else {
-        bpAddEventEdge(step.event_id, step.timeslot, 'bp-active');
-        bpHighlightConflicts();
-    }
+        }
+
+        // (C) Update satisfaction for involved stakeholders
+        if (info) {
+            bpUpdateSatisfaction(info.teacher_id, step.payoff);
+            (info.student_group_ids||[]).forEach(gid => bpUpdateSatisfaction(gid, step.payoff));
+        }
+    }, delay);
+}
+
+// (D) Nash equilibrium sweep — checkmarks cascade across all players
+function bpNashSweep() {
+    if (!bpState.svg) return;
+    bpState.players.forEach((p, i) => {
+        const checkId = 'bp-check-' + p.id.replace(/[^a-zA-Z0-9]/g,'_');
+        bpState.svg.select('#'+checkId)
+            .transition().delay(i*80).duration(200).attr('opacity',1);
+        // Brief glow on player
+        const playerId = 'bp-player-' + p.id.replace(/[^a-zA-Z0-9]/g,'_');
+        bpState.svg.select('#'+playerId)
+            .transition().delay(i*80).duration(150).attr('stroke-width',3)
+            .transition().duration(300).attr('stroke-width',2);
+    });
 }
 
 function bpReset() {
     if (bpState.edgeGroup) bpState.edgeGroup.selectAll('*').remove();
+    if (bpState.thinkGroup) bpState.thinkGroup.selectAll('*').remove();
     bpState.edges = {};
     bpState.eventToEdgeKey = {};
     if (bpState.svg) {
-        bpState.svg.selectAll('.bp-resource').attr('stroke','#484f58').attr('stroke-width',1).classed('bp-resource-conflict',false);
+        bpState.svg.selectAll('.bp-resource').attr('stroke','#30363d').attr('stroke-width',1.5).classed('bp-resource-conflict',false);
+        bpState.svg.selectAll('.bp-nash-check').attr('opacity',0);
+        bpState.svg.selectAll('.bp-demand-bar').attr('width',0);
+        bpState.svg.selectAll('.bp-sat-arc').attr('d', bpState.arcGen?.({endAngle:0}) || '');
+        bpState.svg.selectAll('.bp-player-circle').attr('filter',null).attr('stroke-width',2);
     }
+    bpState.resources?.forEach(r => { bpState.demandCount[r.id] = 0; });
+    bpState.players?.forEach(p => { bpState.satisfactionData[p.id] = {total:0,count:0}; });
 }
 
 // ─── Timetable Grid ─────────────────────────────────────────────────────────

@@ -184,17 +184,20 @@ class VectorizedSolver(SolverBackend):
 
             return pref - conflict - spread
 
-        def best_slot_for_event(i: int) -> tuple[int, float]:
-            """Find best timeslot for event i — vectorized over timeslots."""
-            # Preference row
+        def best_slot_for_event(i: int) -> tuple[int, float, np.ndarray, np.ndarray]:
+            """Find best timeslot for event i — vectorized over timeslots.
+            Returns (best_j, best_payoff, all_payoffs, conflict_counts)."""
             prefs = P[i]  # shape (T,)
 
-            # Conflict penalty per timeslot: for each slot j, sum W[i,k] where assignment[k]==j
+            # Conflict penalty per timeslot
             conflict_pen = np.zeros(T, dtype=np.float64)
+            hard_counts = np.zeros(T, dtype=np.int32)
             for k in range(N):
                 if k == i or assignment[k] < 0:
                     continue
                 conflict_pen[assignment[k]] += W[i, k]
+                if W[i, k] >= 1000:
+                    hard_counts[assignment[k]] += 1
 
             # Spread penalty per timeslot
             spread_pen = np.zeros(T, dtype=np.float64)
@@ -208,7 +211,7 @@ class VectorizedSolver(SolverBackend):
 
             payoffs = prefs - conflict_pen - spread_pen
             best_j = int(np.argmax(payoffs))
-            return best_j, float(payoffs[best_j])
+            return best_j, float(payoffs[best_j]), payoffs, hard_counts
 
         # ── Phase A: Greedy initial assignment ──
         # Order by degree (most constrained first)
@@ -223,10 +226,19 @@ class VectorizedSolver(SolverBackend):
 
             if self.greedy_randomness > 0 and rng.random() < self.greedy_randomness:
                 best_j = rng.randint(0, T - 1)
+                _, _, all_payoffs, hard_counts = best_slot_for_event(idx)
                 reason = "Random initial placement (demo mode)"
+                chosen_payoff = float(all_payoffs[best_j])
             else:
-                best_j, _ = best_slot_for_event(idx)
+                best_j, chosen_payoff, all_payoffs, hard_counts = best_slot_for_event(idx)
                 reason = f"Most constrained ({degrees[idx]} edges), best payoff slot"
+
+            # Build top alternatives for animation
+            alts = sorted(
+                [{"timeslot": str(idx_to_ts[j]), "payoff": round(float(all_payoffs[j]), 3),
+                  "conflicts": int(hard_counts[j])} for j in range(T)],
+                key=lambda a: a["payoff"], reverse=True
+            )
 
             delta = delta_conflicts_for_move(idx, -1, best_j)
             assignment[idx] = best_j
@@ -240,6 +252,8 @@ class VectorizedSolver(SolverBackend):
                 conflicts_before=conflicts_before,
                 conflicts_after=conflicts_after,
                 reason=reason,
+                payoff=chosen_payoff,
+                alternatives=alts,
             ))
 
         # ── Phase B: Iterative best-response ──
@@ -256,23 +270,29 @@ class VectorizedSolver(SolverBackend):
                 current_j = assignment[idx]
                 current_payoff = compute_payoff_for_event(idx, current_j) if current_j >= 0 else float("-inf")
 
-                best_j, best_payoff = best_slot_for_event(idx)
+                best_j, best_payoff, all_payoffs, hard_counts = best_slot_for_event(idx)
 
                 if best_j != current_j and best_payoff > current_payoff + 1e-9:
                     old_ts_str = str(idx_to_ts[current_j]) if current_j >= 0 else None
                     conflicts_before = _hard_conflicts[0]
-                    delta = delta_conflicts_for_move(idx, current_j, best_j)
+                    d = delta_conflicts_for_move(idx, current_j, best_j)
                     assignment[idx] = best_j
-                    _hard_conflicts[0] += delta
+                    _hard_conflicts[0] += d
                     conflicts_after = _hard_conflicts[0]
                     improved = True
 
-                    delta = conflicts_before - conflicts_after
+                    cdelta = conflicts_before - conflicts_after
                     reason = f"Iter {iterations}: moved for better payoff"
-                    if delta > 0:
-                        reason += f", resolved {delta} conflict{'s' if delta > 1 else ''}"
-                    elif delta < 0:
-                        reason += f", trade-off (+{-delta} conflicts for better preference)"
+                    if cdelta > 0:
+                        reason += f", resolved {cdelta} conflict{'s' if cdelta > 1 else ''}"
+                    elif cdelta < 0:
+                        reason += f", trade-off (+{-cdelta} conflicts for better preference)"
+
+                    alts = sorted(
+                        [{"timeslot": str(idx_to_ts[j]), "payoff": round(float(all_payoffs[j]), 3),
+                          "conflicts": int(hard_counts[j])} for j in range(T)],
+                        key=lambda a: a["payoff"], reverse=True
+                    )
 
                     steps.append(SolverStep(
                         event_id=events[idx].event_id,
@@ -282,6 +302,8 @@ class VectorizedSolver(SolverBackend):
                         conflicts_before=conflicts_before,
                         conflicts_after=conflicts_after,
                         reason=reason,
+                        payoff=best_payoff,
+                        alternatives=alts,
                     ))
 
             if not improved:
