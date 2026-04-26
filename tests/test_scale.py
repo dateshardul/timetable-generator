@@ -60,6 +60,35 @@ def _build_large_dataset(num_teachers=15, num_groups=6, num_courses=20, lectures
     }
 
 
+class TestVectorizedSolver:
+    def test_matches_classical_small(self):
+        """Vectorized solver produces valid results on small dataset."""
+        from src.solvers.vectorized import VectorizedSolver
+        data = _build_large_dataset(num_teachers=10, num_groups=4, num_courses=20, lectures_per=3)
+        result = Orchestrator(solver=VectorizedSolver(seed=42)).generate(data)
+        assert result["converged"]
+
+    def test_1000_events(self):
+        """1000 events in reasonable time."""
+        from src.solvers.vectorized import VectorizedSolver
+        data = _build_large_dataset(num_teachers=40, num_groups=15, num_courses=200, lectures_per=5)
+        data['timeslots'] = [
+            {"day": d, "period": p, "start_hour": 7+p, "start_minute": 0, "duration_minutes": 60}
+            for d in ["Monday","Tuesday","Wednesday","Thursday","Friday"]
+            for p in range(1, 11)
+        ]
+        total = sum(s["lectures_per_week"] for s in data["sections"])
+        assert total == 1000
+
+        start = time.time()
+        result = Orchestrator(solver=VectorizedSolver(seed=42)).generate(data)
+        elapsed = time.time() - start
+
+        assert result["converged"]
+        assert elapsed < 30  # should be well under 10s
+        print(f"\n  1000 events (vectorized): {elapsed:.2f}s")
+
+
 class TestScale:
     def test_100_events(self):
         """~60 events (20 courses x 3 lectures). Should converge quickly."""

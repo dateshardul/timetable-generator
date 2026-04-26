@@ -10,12 +10,14 @@ from flask import Flask, jsonify, redirect, request, render_template
 
 from src.engine.orchestrator import Orchestrator
 from src.solvers.classical import ClassicalSolver
+from src.solvers.vectorized import VectorizedSolver
 from src.solvers.dwave_stub import DWaveSolver
 from src.solvers.qaoa_stub import QAOASolver
 
 
 SOLVER_REGISTRY = {
     "classical": ClassicalSolver,
+    "vectorized": VectorizedSolver,
     "dwave": DWaveSolver,
     "qaoa": QAOASolver,
 }

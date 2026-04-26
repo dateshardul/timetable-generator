@@ -114,8 +114,8 @@ def check_feasibility(
             )
 
     # ── Max clique from graph (approximation) ──
-    # NetworkX has a greedy max clique approximation
-    if graph.number_of_nodes() > 0:
+    # Only for small-medium graphs — max_clique is expensive on large dense graphs
+    if 0 < graph.number_of_nodes() <= 500:
         try:
             clique = nx.approximation.max_clique(graph)
             clique_size = len(clique)
