@@ -874,12 +874,16 @@ function animStep() {
     narr += `<div style="font-size:11px;color:#484f58;margin-top:2px;">${step.reason}</div>`;
     document.getElementById('anim-narration').innerHTML = narr;
 
-    // Log entry
-    const logEntry = document.createElement('div');
-    logEntry.className = `anim-log-entry ${step.phase}`;
-    logEntry.innerHTML = `<strong>${courseName}</strong> &rarr; ${step.timeslot.replace(/\(.*\)/,'')} ${step.conflicts_after>0?'<span style="color:#f85149;">('+step.conflicts_after+' conflicts)</span>':'<span style="color:#3fb950;">&#10003;</span>'}`;
+    // Log entry — write to both hidden log and bipartite overlay
+    const logHtml = `<div class="anim-log-entry ${step.phase}"><strong>${courseName}</strong> &rarr; ${step.timeslot.replace(/\(.*\)/,'')} ${step.conflicts_after>0?'<span style="color:#f85149;">('+step.conflicts_after+' conflicts)</span>':'<span style="color:#3fb950;">&#10003;</span>'}</div>`;
     const log = document.getElementById('anim-log');
-    log.prepend(logEntry);
+    log.insertAdjacentHTML('afterbegin', logHtml);
+    const bpLog = document.getElementById('bp-log-overlay');
+    if (bpLog) {
+        bpLog.insertAdjacentHTML('afterbegin', logHtml);
+        // Keep only last 8 entries in overlay
+        while (bpLog.children.length > 8) bpLog.removeChild(bpLog.lastChild);
+    }
 
     // ── Update player cards ──
     // Reset all cards to remove "active" highlight
@@ -973,6 +977,8 @@ function animReset() {
     animState.stepIdx = 0;
     document.querySelectorAll('#anim-grid-wrap td').forEach(td => { td.innerHTML = ''; });
     document.getElementById('anim-log').innerHTML = '';
+    const bpLog = document.getElementById('bp-log-overlay');
+    if (bpLog) bpLog.innerHTML = '';
     document.getElementById('anim-narration').textContent = 'Click Play to watch the solver fill the timetable step by step.';
     updateAnimScoreboard(0, 0, new Set(), '—');
     // Reset player cards
@@ -990,16 +996,7 @@ document.getElementById('btn-pause').addEventListener('click', animPause);
 document.getElementById('btn-step').addEventListener('click', () => { animPause(); animStep(); });
 document.getElementById('btn-reset').addEventListener('click', animReset);
 
-// Sidebar view toggle (Players / Event Log)
-document.querySelectorAll('.sidebar-view-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-        document.querySelectorAll('.sidebar-view-btn').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        const view = btn.dataset.view;
-        document.getElementById('player-arena').style.display = view === 'arena' ? '' : 'none';
-        document.getElementById('anim-log-wrap').style.display = view === 'log' ? '' : 'none';
-    });
-});
+// (Sidebar removed — info is now in the bipartite graph overlay)
 
 // Main view toggle (Grid / Bipartite)
 document.querySelectorAll('.main-view-btn').forEach(btn => {
@@ -1137,15 +1134,14 @@ function renderBipartite() {
             d.y = Math.max(d.r+5, Math.min(H-d.r-5, d.y));
             return `translate(${d.x},${d.y})`;
         });
-        // Update link positions
-        linkGroup.selectAll('.bp-link').attr('d', d => {
-            const s = nodeMap[d.source], t = nodeMap[d.target];
-            if (!s || !t) return '';
-            const sx = (s.fx||s.x) + (s.nodeType==='resource'?-14:s.r);
-            const tx = (t.fx||t.x) + (t.nodeType==='resource'?-14:-t.r);
-            const sy = s.y, ty = t.y;
+        // Update link positions from bpState.edges (not data-bound)
+        Object.values(bpState.edges).forEach(e => {
+            const s = nodeMap[e.playerId], t = nodeMap[e.resourceId];
+            if (!s || !t || !e.path) return;
+            const sx = (s.fx||s.x) + s.r, sy = s.y;
+            const tx = (t.fx||t.x) - 14, ty = t.y;
             const mx = (sx+tx)/2;
-            return `M${sx},${sy} C${mx},${sy} ${mx},${ty} ${tx},${ty}`;
+            e.path.attr('d', `M${sx},${sy} C${mx},${sy} ${mx},${ty} ${tx},${ty}`);
         });
     });
 

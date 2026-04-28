@@ -28,7 +28,7 @@
         /* Graph + Solver: main panel fills space, sidebar fixed */
         #graph-container, #solver-container { flex: 1; min-width: 0; display: flex; flex-direction: column; }
         #graph-svg, #solver-svg { flex: 1; min-height: 0; display: block; }
-        #graph-sidebar, #solver-controls { width: 260px; flex-shrink: 0; overflow-y: auto; }
+        #graph-sidebar { width: 260px; flex-shrink: 0; overflow-y: auto; }
 
         .node-info { font-size: 13px; line-height: 1.6; }
         .node-info dt { color: #8b949e; }
@@ -189,7 +189,7 @@
             .tab-content.active { flex-direction: column; overflow-y: auto; }
 
             /* Sidebars below main content on mobile */
-            #graph-sidebar, #solver-controls, #timetable-filters { width: 100%; max-height: 240px; flex-shrink: 0; }
+            #graph-sidebar, #timetable-filters { width: 100%; max-height: 240px; flex-shrink: 0; }
             #graph-container, #solver-container { min-height: 350px; flex-shrink: 0; }
             #timetable-container { min-height: 300px; }
 
@@ -402,27 +402,15 @@
             <!-- Animated timetable grid -->
             <div id="anim-grid-wrap" style="flex:1;overflow:auto;display:none;"></div>
             <!-- Bipartite graph -->
-            <div id="bipartite-wrap" style="flex:1;overflow:hidden;display:none;">
+            <div id="bipartite-wrap" style="flex:1;overflow:hidden;display:none;position:relative;">
                 <svg id="bipartite-svg" style="width:100%;height:100%;display:block;"></svg>
-            </div>
-        </div>
-        <div class="panel" id="solver-controls" style="display:flex;flex-direction:column;">
-            <!-- View toggle -->
-            <div style="display:flex;gap:4px;margin-bottom:10px;">
-                <button class="btn sidebar-view-btn active" data-view="arena" style="flex:1;font-size:12px;padding:6px;">Players</button>
-                <button class="btn sidebar-view-btn" data-view="log" style="flex:1;font-size:12px;padding:6px;">Event Log</button>
-            </div>
-            <!-- Player Arena -->
-            <div id="player-arena" style="flex:1;overflow-y:auto;">
-                <div style="font-size:11px;color:#484f58;margin-bottom:8px;">
-                    Each event is a <strong style="color:#8b949e;">player</strong> competing for <strong style="color:#8b949e;">timeslot resources</strong>.
+                <!-- Floating event log overlay (bottom-right corner) -->
+                <div id="bp-log-overlay" style="position:absolute;bottom:8px;right:8px;max-width:280px;max-height:150px;overflow-y:auto;background:#0d1117cc;border:1px solid #30363d;border-radius:6px;padding:6px 8px;font-size:11px;backdrop-filter:blur(4px);">
                 </div>
-                <div id="player-cards"></div>
             </div>
-            <!-- Event Log (hidden by default) -->
-            <div id="anim-log-wrap" style="flex:1;overflow-y:auto;display:none;">
-                <div id="anim-log" style="font-size:12px;"></div>
-            </div>
+            <!-- Hidden containers for player cards and log (still needed by JS) -->
+            <div id="player-arena" style="display:none;"><div id="player-cards"></div></div>
+            <div id="anim-log-wrap" style="display:none;"><div id="anim-log"></div></div>
         </div>
     </div>
 
