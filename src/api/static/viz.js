@@ -507,6 +507,8 @@ document.getElementById('btn-clear-all').addEventListener('click', () => {
     document.getElementById('anim-grid-wrap').innerHTML = '';
     document.getElementById('bipartite-wrap').style.display = 'none';
     d3.select('#bipartite-svg').selectAll('*').remove();
+    document.getElementById('auction-wrap').style.display = 'none';
+    auctionState.initialized = false;
     document.getElementById('solver-empty').style.display = '';
     document.getElementById('timetable-grid').innerHTML = '';
     document.getElementById('timetable-empty').style.display = '';
@@ -722,9 +724,10 @@ function renderSolverView() {
 
     document.getElementById('solver-empty').style.display = 'none';
     // Show whichever main view is active
-    const isBipartiteView = document.querySelector('.main-view-btn[data-mainview="bipartite"]')?.classList.contains('active');
-    document.getElementById('anim-grid-wrap').style.display = isBipartiteView ? 'none' : '';
-    document.getElementById('bipartite-wrap').style.display = isBipartiteView ? '' : 'none';
+    const activeView = document.querySelector('.main-view-btn.active')?.dataset?.mainview || 'grid';
+    document.getElementById('anim-grid-wrap').style.display = activeView === 'grid' ? '' : 'none';
+    document.getElementById('bipartite-wrap').style.display = activeView === 'bipartite' ? '' : 'none';
+    document.getElementById('auction-wrap').style.display = activeView === 'auction' ? '' : 'none';
 
     const input = state.inputData;
     const courseMap = {}; input.courses.forEach(c=>{courseMap[c.course_id]=c;});
@@ -784,10 +787,10 @@ function renderSolverView() {
 
     updateAnimScoreboard(0, 0, new Set(), '—');
 
-    // If bipartite view is active, render it
-    if (document.querySelector('.main-view-btn[data-mainview="bipartite"]')?.classList.contains('active')) {
-        renderBipartite();
-    }
+    // Render active view
+    const activeV = document.querySelector('.main-view-btn.active')?.dataset?.mainview;
+    if (activeV === 'bipartite') renderBipartite();
+    if (activeV === 'auction') renderAuction();
 }
 
 function parseTimeslotStr(tsStr) {
@@ -808,8 +811,9 @@ function animStep() {
             c.classList.remove('pc-moving','pc-conflict');
             if (c.classList.contains('pc-placed')) c.classList.replace('pc-placed','pc-settled');
         });
-        // (D) Nash sweep on bipartite graph
+        // (D) Nash sweep on bipartite graph + auction completion
         bpNashSweep();
+        auctionComplete();
         return;
     }
 
@@ -939,8 +943,9 @@ function animStep() {
         }
     }
 
-    // Update bipartite graph if visible
+    // Update bipartite graph and auction if visible
     bpAnimStep(step);
+    auctionAnimStep(step);
 
     animState.stepIdx++;
 }
@@ -987,8 +992,9 @@ function animReset() {
         card.querySelector('.pc-status').innerHTML = '<span style="color:#484f58;">&#9679;</span> Waiting for slot...';
         card.querySelector('.pc-bar').style.width = '0%';
     });
-    // Reset bipartite
+    // Reset bipartite + auction
     bpReset();
+    auctionReset();
 }
 
 document.getElementById('btn-play').addEventListener('click', animPlay);
@@ -998,7 +1004,7 @@ document.getElementById('btn-reset').addEventListener('click', animReset);
 
 // (Sidebar removed — info is now in the bipartite graph overlay)
 
-// Main view toggle (Grid / Bipartite)
+// Main view toggle (Grid / Bipartite / Auction)
 document.querySelectorAll('.main-view-btn').forEach(btn => {
     btn.addEventListener('click', () => {
         document.querySelectorAll('.main-view-btn').forEach(b => b.classList.remove('active'));
@@ -1006,7 +1012,9 @@ document.querySelectorAll('.main-view-btn').forEach(btn => {
         const view = btn.dataset.mainview;
         document.getElementById('anim-grid-wrap').style.display = view === 'grid' && state.result ? '' : 'none';
         document.getElementById('bipartite-wrap').style.display = view === 'bipartite' && state.result ? '' : 'none';
+        document.getElementById('auction-wrap').style.display = view === 'auction' && state.result ? '' : 'none';
         if (view === 'bipartite' && state.result) renderBipartite();
+        if (view === 'auction' && state.result) renderAuction();
     });
 });
 
@@ -1368,6 +1376,181 @@ function bpReset() {
     // Reset opacity in case click-highlight was active
     bpState.gNodes?.attr('opacity',1);
     bpState.linkGroup?.selectAll('.bp-link').attr('opacity',0.6);
+}
+
+// ─── Auction House Visualization ────────────────────────────────────────────
+let auctionState = { lots:[], slotOccupants:{}, initialized:false };
+
+function renderAuction() {
+    if (!state.result || !state.inputData) return;
+    document.getElementById('auction-wrap').style.display = '';
+    const input = state.inputData;
+    const colorScale = animState.colorScale;
+
+    // Build timeslot lot cards
+    const tsSet = new Set();
+    (state.result.assignments||[]).forEach(a => tsSet.add(a.timeslot));
+    (animState.steps||[]).forEach(s => { tsSet.add(s.timeslot); if(s.old_timeslot) tsSet.add(s.old_timeslot); });
+    const slots = [...tsSet].sort();
+
+    auctionState.lots = slots;
+    auctionState.slotOccupants = {};
+    slots.forEach(s => { auctionState.slotOccupants[s] = []; });
+    auctionState.initialized = true;
+
+    // Render lot cards
+    const lotsEl = document.getElementById('auction-lots');
+    lotsEl.innerHTML = slots.map(s => {
+        const label = s.replace(/\s*\(.*\)/,'');
+        return `<div class="lot-card lot-neutral" id="lot-${s.replace(/[^a-zA-Z0-9]/g,'_')}">
+            <div class="lot-slot">${label}</div>
+            <div class="lot-payoff" style="color:#484f58;">—</div>
+            <div class="lot-conflicts" style="color:#484f58;">Empty</div>
+            <div class="lot-occupants"></div>
+        </div>`;
+    }).join('');
+
+    // Reset bidder
+    const bidderAvatar = document.getElementById('auction-bidder-avatar');
+    bidderAvatar.textContent = '?';
+    bidderAvatar.style.borderColor = '#484f58';
+    bidderAvatar.style.color = '#8b949e';
+    document.getElementById('auction-bidder-name').textContent = 'Waiting for bidder...';
+    document.getElementById('auction-bidder-meta').textContent = 'Click Play to start the auction';
+    document.getElementById('auction-round-badge').textContent = 'Round 0';
+    document.getElementById('auction-ticker').innerHTML = '';
+}
+
+function auctionAnimStep(step) {
+    if (!auctionState.initialized) return;
+    const info = animState.eventInfo?.[step.event_id];
+    if (!info) return;
+    const colorScale = animState.colorScale;
+    const courseColor = colorScale?.(info.course_name||'') || '#8b949e';
+    const courseName = info.course_name || step.event_id;
+
+    // ── Update bidder card ──
+    const avatar = document.getElementById('auction-bidder-avatar');
+    avatar.textContent = courseName.split(' ').map(w=>w[0]).join('').slice(0,2);
+    avatar.style.borderColor = courseColor;
+    avatar.style.color = courseColor;
+    avatar.style.background = courseColor + '22';
+
+    const isMove = step.phase === 'best_response';
+    document.getElementById('auction-bidder-name').innerHTML =
+        `<span style="color:${courseColor};">${courseName}</span>` +
+        (isMove ? ' <span style="color:#d29922;font-size:12px;">RE-BIDDING</span>' : '');
+    document.getElementById('auction-bidder-meta').textContent =
+        `Teacher: ${info.teacher_id} | ${isMove ? 'Switching from '+step.old_timeslot?.replace(/\s*\(.*\)/,'') : 'Looking for a timeslot...'}`;
+    document.getElementById('auction-round-badge').textContent =
+        `Step ${animState.stepIdx + 1}`;
+
+    // ── Update lot cards with payoff scores ──
+    const alts = step.alternatives || [];
+    const altMap = {};
+    alts.forEach(a => { altMap[a.timeslot] = a; });
+
+    // If moving, remove from old slot first
+    if (step.old_timeslot && auctionState.slotOccupants[step.old_timeslot]) {
+        auctionState.slotOccupants[step.old_timeslot] =
+            auctionState.slotOccupants[step.old_timeslot].filter(e => e.id !== step.event_id);
+    }
+
+    // Reset all lot cards
+    auctionState.lots.forEach(s => {
+        const lotId = 'lot-' + s.replace(/[^a-zA-Z0-9]/g,'_');
+        const el = document.getElementById(lotId);
+        if (!el) return;
+        const alt = altMap[s];
+        const occupants = auctionState.slotOccupants[s] || [];
+        const isChosen = s === step.timeslot;
+        const hasConflict = alt ? alt.conflicts > 0 : false;
+
+        // Payoff display
+        const payoffEl = el.querySelector('.lot-payoff');
+        if (alt) {
+            const payoff = alt.payoff;
+            const hue = Math.max(0, Math.min(120, ((payoff + 1) / 2) * 120)); // map payoff to 0-120 hue
+            payoffEl.textContent = payoff.toFixed(1);
+            payoffEl.style.color = hasConflict ? '#f85149' : `hsl(${hue},70%,55%)`;
+        } else {
+            payoffEl.textContent = '—';
+            payoffEl.style.color = '#484f58';
+        }
+
+        // Conflict/status display
+        const conflictEl = el.querySelector('.lot-conflicts');
+        if (isChosen) {
+            conflictEl.innerHTML = '<span class="gavel-anim">&#9881;</span> <strong>SOLD!</strong>';
+            conflictEl.style.color = '#58a6ff';
+            el.className = 'lot-card lot-won lot-winning';
+        } else if (hasConflict) {
+            conflictEl.innerHTML = `&#9888; ${alt.conflicts} conflict${alt.conflicts>1?'s':''}`;
+            conflictEl.style.color = '#f85149';
+            el.className = 'lot-card lot-conflict';
+        } else if (alt) {
+            conflictEl.textContent = 'Available';
+            conflictEl.style.color = '#3fb950';
+            el.className = 'lot-card lot-neutral';
+        } else {
+            conflictEl.textContent = occupants.length > 0 ? `${occupants.length} assigned` : 'Empty';
+            conflictEl.style.color = '#484f58';
+            el.className = 'lot-card lot-ghost';
+        }
+
+        // Show who's already in this slot
+        const occEl = el.querySelector('.lot-occupants');
+        occEl.innerHTML = occupants.map(o => {
+            const c = colorScale?.(o.name||'') || '#8b949e';
+            return `<span style="color:${c};font-size:10px;">&#9679;</span>`;
+        }).join(' ');
+    });
+
+    // ── Add to slot occupants ──
+    if (!auctionState.slotOccupants[step.timeslot]) auctionState.slotOccupants[step.timeslot] = [];
+    auctionState.slotOccupants[step.timeslot].push({id:step.event_id, name:info.course_name});
+
+    // ── Ticker entry ──
+    const ticker = document.getElementById('auction-ticker');
+    const delta = step.conflicts_before - step.conflicts_after;
+    let tickerText = `<span style="color:${courseColor};">&#9679;</span> <strong>${courseName}</strong> `;
+    if (isMove) {
+        tickerText += `switched to ${step.timeslot.replace(/\s*\(.*\)/,'')}`;
+        if (delta > 0) tickerText += ` <span style="color:#3fb950;">(-${delta} conflicts)</span>`;
+    } else {
+        tickerText += `won ${step.timeslot.replace(/\s*\(.*\)/,'')}`;
+        if (step.conflicts_after > 0) tickerText += ` <span style="color:#f85149;">(${step.conflicts_after} conflicts)</span>`;
+    }
+    ticker.insertAdjacentHTML('afterbegin', `<div class="auction-ticker-entry">${tickerText}</div>`);
+    while (ticker.children.length > 12) ticker.removeChild(ticker.lastChild);
+}
+
+function auctionComplete() {
+    if (!auctionState.initialized) return;
+    document.getElementById('auction-bidder-name').innerHTML =
+        '<span style="color:#3fb950;">&#10003; Auction Complete — Nash Equilibrium</span>';
+    document.getElementById('auction-bidder-meta').textContent = 'No bidder can improve by switching lots.';
+    document.getElementById('auction-bidder-avatar').textContent = '&#10003;';
+    document.getElementById('auction-bidder-avatar').style.borderColor = '#3fb950';
+    document.getElementById('auction-bidder-avatar').style.color = '#3fb950';
+    document.getElementById('auction-bidder-avatar').style.background = '#23863622';
+
+    // Mark all lots as settled
+    auctionState.lots.forEach(s => {
+        const lotId = 'lot-' + s.replace(/[^a-zA-Z0-9]/g,'_');
+        const el = document.getElementById(lotId);
+        if (el) {
+            el.className = 'lot-card lot-won';
+            const conflictEl = el.querySelector('.lot-conflicts');
+            if (conflictEl) { conflictEl.innerHTML = '&#10003; Settled'; conflictEl.style.color = '#3fb950'; }
+        }
+    });
+}
+
+function auctionReset() {
+    auctionState.slotOccupants = {};
+    auctionState.lots.forEach(s => { auctionState.slotOccupants[s] = []; });
+    if (auctionState.initialized) renderAuction();
 }
 
 // ─── Timetable Grid ─────────────────────────────────────────────────────────
