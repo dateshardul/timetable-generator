@@ -141,24 +141,24 @@
         .anim-log-entry.best_response { border-left-color: #3fb950; }
 
         /* Auction house */
-        .lot-card { width:120px; padding:10px; border:2px solid #30363d; border-radius:8px; background:#161b22;
-            text-align:center; cursor:default; transition:all 0.3s; position:relative; }
-        .lot-card .lot-slot { font-size:13px; font-weight:600; color:#e7e9ea; }
-        .lot-card .lot-payoff { font-size:20px; font-weight:700; margin:6px 0; }
-        .lot-card .lot-conflicts { font-size:11px; }
-        .lot-card .lot-occupants { font-size:10px; color:#484f58; margin-top:4px; min-height:14px; }
-        .lot-card.lot-best { border-color:#238636; background:#23863611; box-shadow:0 0 12px #23863633; }
-        .lot-card.lot-conflict { border-color:#f85149; background:#f8514911; }
-        .lot-card.lot-neutral { border-color:#30363d; }
-        .lot-card.lot-won { border-color:#58a6ff; background:#58a6ff11; }
-        .lot-card.lot-ghost { opacity:0.3; }
         @keyframes gavel { 0%{transform:rotate(0deg);} 40%{transform:rotate(-30deg);} 60%{transform:rotate(10deg);} 100%{transform:rotate(0deg);} }
-        @keyframes lot-pop { 0%{transform:scale(0.9);} 50%{transform:scale(1.05);} 100%{transform:scale(1);} }
-        .lot-card.lot-winning { animation: lot-pop 0.4s ease-out; }
-        .gavel-anim { display:inline-block; animation: gavel 0.5s ease-out; font-size:24px; }
-        .lot-card .lot-badge { position:absolute; top:-8px; right:-8px; width:20px; height:20px; border-radius:50%;
-            display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:700; }
-        .auction-ticker-entry { padding:3px 0; border-bottom:1px solid #21262d; }
+        @keyframes lot-reveal { 0%{transform:scale(0.8);opacity:0;} 100%{transform:scale(1);opacity:1;} }
+        @keyframes bidder-pulse { 0%{box-shadow:0 0 0 0 #58a6ff44;} 70%{box-shadow:0 0 0 8px transparent;} 100%{box-shadow:none;} }
+        .gavel-anim { display:inline-block; animation: gavel 0.5s ease-out; }
+        .lot-reveal-anim { animation: lot-reveal 0.3s ease-out; }
+        .auction-ticker-entry { padding:2px 0; border-bottom:1px solid #21262d; }
+
+        /* Bidder cards at bottom */
+        .bidder-card { display:inline-flex; align-items:center; gap:6px; padding:6px 10px; border:1.5px solid #30363d;
+            border-radius:6px; background:#161b22; font-size:11px; transition:all 0.3s; min-width:100px; }
+        .bidder-card .bc-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+        .bidder-card .bc-name { font-weight:600; color:#e7e9ea; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:80px; }
+        .bidder-card .bc-slot { font-size:10px; color:#8b949e; }
+        .bidder-card.bc-waiting { opacity:0.5; }
+        .bidder-card.bc-active { border-color:#58a6ff; background:#58a6ff11; opacity:1; animation: bidder-pulse 0.6s ease-out; }
+        .bidder-card.bc-won { border-color:#23863688; background:#23863611; opacity:1; }
+        .bidder-card.bc-conflict { border-color:#f8514988; background:#f8514911; opacity:1; }
+        .bidder-card.bc-moved { border-color:#d2992288; background:#d2992211; opacity:1; }
 
         /* Bipartite graph */
         .bp-edge { stroke-width:2; fill:none; transition: stroke 0.3s, opacity 0.3s; }
@@ -423,22 +423,31 @@
             <!-- Animated timetable grid -->
             <div id="anim-grid-wrap" style="flex:1;overflow:auto;display:none;"></div>
             <!-- Auction House -->
-            <div id="auction-wrap" style="flex:1;overflow:auto;display:none;">
-                <div id="auction-inner" style="display:flex;flex-direction:column;height:100%;gap:10px;padding:4px;">
-                    <!-- Current bidder -->
-                    <div id="auction-bidder" style="display:flex;align-items:center;gap:14px;padding:12px 16px;background:#161b22;border:1px solid #30363d;border-radius:8px;flex-shrink:0;">
-                        <div id="auction-bidder-avatar" style="width:48px;height:48px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:700;border:2px solid #484f58;background:#21262d;color:#8b949e;">?</div>
-                        <div style="flex:1;">
-                            <div id="auction-bidder-name" style="font-size:16px;font-weight:600;color:#e7e9ea;">Waiting for bidder...</div>
-                            <div id="auction-bidder-meta" style="font-size:12px;color:#8b949e;">Click Play to start the auction</div>
-                        </div>
-                        <div id="auction-round-badge" style="padding:4px 12px;background:#21262d;border-radius:10px;font-size:12px;color:#8b949e;">Round 0</div>
+            <div id="auction-wrap" style="flex:1;overflow:hidden;display:none;">
+                <div style="display:flex;flex-direction:column;height:100%;gap:8px;">
+                    <!-- TOP: Current lot being auctioned -->
+                    <div id="auction-lot-spotlight" style="flex-shrink:0;padding:14px 18px;background:#161b22;border:2px solid #30363d;border-radius:10px;text-align:center;min-height:70px;">
+                        <div style="font-size:11px;color:#484f58;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Now Auctioning</div>
+                        <div id="auction-lot-name" style="font-size:22px;font-weight:700;color:#e7e9ea;">—</div>
+                        <div id="auction-lot-detail" style="font-size:12px;color:#8b949e;margin-top:2px;"></div>
                     </div>
-                    <!-- Lots (timeslot cards) -->
-                    <div style="flex-shrink:0;font-size:12px;color:#8b949e;">Available Lots (Timeslots)</div>
-                    <div id="auction-lots" style="display:flex;flex-wrap:wrap;gap:8px;flex:1;overflow:auto;align-content:flex-start;"></div>
-                    <!-- Auction history ticker -->
-                    <div id="auction-ticker" style="flex-shrink:0;padding:8px 12px;background:#0d1117;border:1px solid #30363d;border-radius:6px;font-size:12px;color:#8b949e;max-height:80px;overflow-y:auto;"></div>
+                    <!-- MIDDLE: Bidder competing + result -->
+                    <div id="auction-action" style="flex-shrink:0;display:flex;align-items:center;gap:12px;padding:10px 14px;background:#0d1117;border:1px solid #30363d;border-radius:8px;">
+                        <div id="auction-bidder-avatar" style="width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:700;border:2px solid #484f58;background:#21262d;color:#8b949e;flex-shrink:0;">?</div>
+                        <div style="flex:1;min-width:0;">
+                            <div id="auction-bidder-name" style="font-size:14px;font-weight:600;color:#e7e9ea;">Waiting...</div>
+                            <div id="auction-bidder-meta" style="font-size:11px;color:#8b949e;">Click Play to start</div>
+                        </div>
+                        <div id="auction-result-badge" style="padding:4px 10px;border-radius:6px;font-size:12px;font-weight:600;background:#21262d;color:#8b949e;">—</div>
+                    </div>
+                    <!-- BOTTOM: All bidder cards (events) -->
+                    <div style="font-size:11px;color:#484f58;flex-shrink:0;display:flex;justify-content:space-between;">
+                        <span>Bidders</span>
+                        <span id="auction-round-badge">Step 0</span>
+                    </div>
+                    <div id="auction-bidders" style="flex:1;overflow:auto;display:flex;flex-wrap:wrap;gap:6px;align-content:flex-start;"></div>
+                    <!-- Ticker -->
+                    <div id="auction-ticker" style="flex-shrink:0;padding:6px 10px;background:#0d1117;border:1px solid #30363d;border-radius:6px;font-size:11px;color:#8b949e;max-height:60px;overflow-y:auto;"></div>
                 </div>
             </div>
             <!-- Bipartite graph -->

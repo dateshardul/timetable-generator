@@ -1379,46 +1379,49 @@ function bpReset() {
 }
 
 // ─── Auction House Visualization ────────────────────────────────────────────
-let auctionState = { lots:[], slotOccupants:{}, initialized:false };
+// Top: current lot (timeslot) being auctioned, revealed one at a time
+// Bottom: all bidders (events) as small cards showing their status
+let auctionState = { initialized:false, bidderAssignments:{} };
 
 function renderAuction() {
     if (!state.result || !state.inputData) return;
     document.getElementById('auction-wrap').style.display = '';
-    const input = state.inputData;
+    const eventInfo = animState.eventInfo || {};
     const colorScale = animState.colorScale;
 
-    // Build timeslot lot cards
-    const tsSet = new Set();
-    (state.result.assignments||[]).forEach(a => tsSet.add(a.timeslot));
-    (animState.steps||[]).forEach(s => { tsSet.add(s.timeslot); if(s.old_timeslot) tsSet.add(s.old_timeslot); });
-    const slots = [...tsSet].sort();
-
-    auctionState.lots = slots;
-    auctionState.slotOccupants = {};
-    slots.forEach(s => { auctionState.slotOccupants[s] = []; });
-    auctionState.initialized = true;
-
-    // Render lot cards
-    const lotsEl = document.getElementById('auction-lots');
-    lotsEl.innerHTML = slots.map(s => {
-        const label = s.replace(/\s*\(.*\)/,'');
-        return `<div class="lot-card lot-neutral" id="lot-${s.replace(/[^a-zA-Z0-9]/g,'_')}">
-            <div class="lot-slot">${label}</div>
-            <div class="lot-payoff" style="color:#484f58;">—</div>
-            <div class="lot-conflicts" style="color:#484f58;">Empty</div>
-            <div class="lot-occupants"></div>
+    // Build bidder cards (all events)
+    const biddersEl = document.getElementById('auction-bidders');
+    biddersEl.innerHTML = Object.entries(eventInfo).map(([eid, info]) => {
+        const c = colorScale?.(info.course_name||'') || '#8b949e';
+        return `<div class="bidder-card bc-waiting" id="bc-${eid.replace(/[^a-zA-Z0-9]/g,'_')}">
+            <div class="bc-dot" style="background:${c};"></div>
+            <div>
+                <div class="bc-name" style="color:${c};">${info.course_name||eid}</div>
+                <div class="bc-slot">Waiting...</div>
+            </div>
         </div>`;
     }).join('');
 
-    // Reset bidder
-    const bidderAvatar = document.getElementById('auction-bidder-avatar');
-    bidderAvatar.textContent = '?';
-    bidderAvatar.style.borderColor = '#484f58';
-    bidderAvatar.style.color = '#8b949e';
-    document.getElementById('auction-bidder-name').textContent = 'Waiting for bidder...';
-    document.getElementById('auction-bidder-meta').textContent = 'Click Play to start the auction';
-    document.getElementById('auction-round-badge').textContent = 'Round 0';
+    // Reset spotlight
+    document.getElementById('auction-lot-name').textContent = '—';
+    document.getElementById('auction-lot-detail').textContent = 'Click Play to start the auction';
+    document.getElementById('auction-lot-spotlight').style.borderColor = '#30363d';
+
+    // Reset action area
+    document.getElementById('auction-bidder-avatar').textContent = '?';
+    document.getElementById('auction-bidder-avatar').style.borderColor = '#484f58';
+    document.getElementById('auction-bidder-avatar').style.color = '#8b949e';
+    document.getElementById('auction-bidder-avatar').style.background = '#21262d';
+    document.getElementById('auction-bidder-name').textContent = 'Waiting...';
+    document.getElementById('auction-bidder-meta').textContent = 'Click Play to start';
+    document.getElementById('auction-result-badge').textContent = '—';
+    document.getElementById('auction-result-badge').style.background = '#21262d';
+    document.getElementById('auction-result-badge').style.color = '#8b949e';
+    document.getElementById('auction-round-badge').textContent = 'Step 0';
     document.getElementById('auction-ticker').innerHTML = '';
+
+    auctionState.initialized = true;
+    auctionState.bidderAssignments = {};
 }
 
 function auctionAnimStep(step) {
@@ -1428,128 +1431,126 @@ function auctionAnimStep(step) {
     const colorScale = animState.colorScale;
     const courseColor = colorScale?.(info.course_name||'') || '#8b949e';
     const courseName = info.course_name || step.event_id;
+    const slotLabel = step.timeslot.replace(/\s*\(.*\)/,'');
+    const isMove = step.phase === 'best_response';
 
-    // ── Update bidder card ──
+    // ── TOP: Reveal the lot (timeslot) being won ──
+    const spotlight = document.getElementById('auction-lot-spotlight');
+    spotlight.style.borderColor = courseColor;
+    spotlight.classList.add('lot-reveal-anim');
+    setTimeout(() => spotlight.classList.remove('lot-reveal-anim'), 300);
+
+    document.getElementById('auction-lot-name').innerHTML =
+        `<span class="gavel-anim" style="font-size:24px;">&#9881;</span> ${slotLabel}`;
+    document.getElementById('auction-lot-name').style.color = '#e7e9ea';
+
+    // Show who else is at this slot
+    const othersHere = Object.entries(auctionState.bidderAssignments)
+        .filter(([eid, ts]) => ts === step.timeslot && eid !== step.event_id)
+        .map(([eid]) => {
+            const i = animState.eventInfo?.[eid];
+            const c = colorScale?.(i?.course_name||'') || '#8b949e';
+            return `<span style="color:${c};">&#9679; ${i?.course_name||eid}</span>`;
+        });
+    const detailParts = [];
+    if (othersHere.length > 0) detailParts.push('Also here: ' + othersHere.join(', '));
+    if (step.conflicts_after > 0) detailParts.push(`<span style="color:#f85149;">&#9888; ${step.conflicts_after} conflict${step.conflicts_after>1?'s':''}</span>`);
+    document.getElementById('auction-lot-detail').innerHTML = detailParts.join(' | ') || 'No conflicts';
+
+    // ── MIDDLE: Bidder info ──
     const avatar = document.getElementById('auction-bidder-avatar');
     avatar.textContent = courseName.split(' ').map(w=>w[0]).join('').slice(0,2);
     avatar.style.borderColor = courseColor;
     avatar.style.color = courseColor;
     avatar.style.background = courseColor + '22';
 
-    const isMove = step.phase === 'best_response';
     document.getElementById('auction-bidder-name').innerHTML =
-        `<span style="color:${courseColor};">${courseName}</span>` +
-        (isMove ? ' <span style="color:#d29922;font-size:12px;">RE-BIDDING</span>' : '');
+        `<span style="color:${courseColor};">${courseName}</span>`;
     document.getElementById('auction-bidder-meta').textContent =
-        `Teacher: ${info.teacher_id} | ${isMove ? 'Switching from '+step.old_timeslot?.replace(/\s*\(.*\)/,'') : 'Looking for a timeslot...'}`;
-    document.getElementById('auction-round-badge').textContent =
-        `Step ${animState.stepIdx + 1}`;
+        isMove ? `Re-bidding — was at ${step.old_timeslot?.replace(/\s*\(.*\)/,'')}` : `Teacher: ${info.teacher_id}`;
 
-    // ── Update lot cards with payoff scores ──
-    const alts = step.alternatives || [];
-    const altMap = {};
-    alts.forEach(a => { altMap[a.timeslot] = a; });
-
-    // If moving, remove from old slot first
-    if (step.old_timeslot && auctionState.slotOccupants[step.old_timeslot]) {
-        auctionState.slotOccupants[step.old_timeslot] =
-            auctionState.slotOccupants[step.old_timeslot].filter(e => e.id !== step.event_id);
+    const badge = document.getElementById('auction-result-badge');
+    if (step.conflicts_after > 0) {
+        badge.textContent = '&#9888; Conflict';
+        badge.style.background = '#f8514922';
+        badge.style.color = '#f85149';
+    } else {
+        badge.innerHTML = '&#10003; Won';
+        badge.style.background = '#23863622';
+        badge.style.color = '#3fb950';
     }
 
-    // Reset all lot cards
-    auctionState.lots.forEach(s => {
-        const lotId = 'lot-' + s.replace(/[^a-zA-Z0-9]/g,'_');
-        const el = document.getElementById(lotId);
-        if (!el) return;
-        const alt = altMap[s];
-        const occupants = auctionState.slotOccupants[s] || [];
-        const isChosen = s === step.timeslot;
-        const hasConflict = alt ? alt.conflicts > 0 : false;
+    document.getElementById('auction-round-badge').textContent = `Step ${animState.stepIdx + 1}`;
 
-        // Payoff display
-        const payoffEl = el.querySelector('.lot-payoff');
-        if (alt) {
-            const payoff = alt.payoff;
-            const hue = Math.max(0, Math.min(120, ((payoff + 1) / 2) * 120)); // map payoff to 0-120 hue
-            payoffEl.textContent = payoff.toFixed(1);
-            payoffEl.style.color = hasConflict ? '#f85149' : `hsl(${hue},70%,55%)`;
-        } else {
-            payoffEl.textContent = '—';
-            payoffEl.style.color = '#484f58';
+    // ── BOTTOM: Update bidder cards ──
+    // Remove from old slot if moving
+    if (isMove && step.old_timeslot) {
+        delete auctionState.bidderAssignments[step.event_id];
+    }
+    auctionState.bidderAssignments[step.event_id] = step.timeslot;
+
+    // Reset all bidder cards, then update
+    document.querySelectorAll('.bidder-card').forEach(c => {
+        if (c.id !== 'bc-'+step.event_id.replace(/[^a-zA-Z0-9]/g,'_')) {
+            if (!c.classList.contains('bc-won') && !c.classList.contains('bc-conflict') && !c.classList.contains('bc-moved'))
+                return; // leave already-assigned ones alone
         }
-
-        // Conflict/status display
-        const conflictEl = el.querySelector('.lot-conflicts');
-        if (isChosen) {
-            conflictEl.innerHTML = '<span class="gavel-anim">&#9881;</span> <strong>SOLD!</strong>';
-            conflictEl.style.color = '#58a6ff';
-            el.className = 'lot-card lot-won lot-winning';
-        } else if (hasConflict) {
-            conflictEl.innerHTML = `&#9888; ${alt.conflicts} conflict${alt.conflicts>1?'s':''}`;
-            conflictEl.style.color = '#f85149';
-            el.className = 'lot-card lot-conflict';
-        } else if (alt) {
-            conflictEl.textContent = 'Available';
-            conflictEl.style.color = '#3fb950';
-            el.className = 'lot-card lot-neutral';
-        } else {
-            conflictEl.textContent = occupants.length > 0 ? `${occupants.length} assigned` : 'Empty';
-            conflictEl.style.color = '#484f58';
-            el.className = 'lot-card lot-ghost';
-        }
-
-        // Show who's already in this slot
-        const occEl = el.querySelector('.lot-occupants');
-        occEl.innerHTML = occupants.map(o => {
-            const c = colorScale?.(o.name||'') || '#8b949e';
-            return `<span style="color:${c};font-size:10px;">&#9679;</span>`;
-        }).join(' ');
     });
 
-    // ── Add to slot occupants ──
-    if (!auctionState.slotOccupants[step.timeslot]) auctionState.slotOccupants[step.timeslot] = [];
-    auctionState.slotOccupants[step.timeslot].push({id:step.event_id, name:info.course_name});
+    const activeCardId = 'bc-' + step.event_id.replace(/[^a-zA-Z0-9]/g,'_');
+    const activeCard = document.getElementById(activeCardId);
+    if (activeCard) {
+        const slotEl = activeCard.querySelector('.bc-slot');
+        slotEl.textContent = slotLabel;
+        if (isMove) {
+            activeCard.className = 'bidder-card bc-moved';
+        } else if (step.conflicts_after > 0) {
+            activeCard.className = 'bidder-card bc-conflict';
+        } else {
+            activeCard.className = 'bidder-card bc-won';
+        }
+        activeCard.classList.add('bc-active');
+        setTimeout(() => activeCard.classList.remove('bc-active'), 500);
+    }
 
-    // ── Ticker entry ──
+    // ── Ticker ──
     const ticker = document.getElementById('auction-ticker');
     const delta = step.conflicts_before - step.conflicts_after;
     let tickerText = `<span style="color:${courseColor};">&#9679;</span> <strong>${courseName}</strong> `;
     if (isMove) {
-        tickerText += `switched to ${step.timeslot.replace(/\s*\(.*\)/,'')}`;
-        if (delta > 0) tickerText += ` <span style="color:#3fb950;">(-${delta} conflicts)</span>`;
+        tickerText += `switched to ${slotLabel}`;
+        if (delta > 0) tickerText += ` <span style="color:#3fb950;">(-${delta})</span>`;
     } else {
-        tickerText += `won ${step.timeslot.replace(/\s*\(.*\)/,'')}`;
+        tickerText += `&#8594; ${slotLabel}`;
         if (step.conflicts_after > 0) tickerText += ` <span style="color:#f85149;">(${step.conflicts_after} conflicts)</span>`;
     }
     ticker.insertAdjacentHTML('afterbegin', `<div class="auction-ticker-entry">${tickerText}</div>`);
-    while (ticker.children.length > 12) ticker.removeChild(ticker.lastChild);
+    while (ticker.children.length > 15) ticker.removeChild(ticker.lastChild);
 }
 
 function auctionComplete() {
     if (!auctionState.initialized) return;
-    document.getElementById('auction-bidder-name').innerHTML =
-        '<span style="color:#3fb950;">&#10003; Auction Complete — Nash Equilibrium</span>';
-    document.getElementById('auction-bidder-meta').textContent = 'No bidder can improve by switching lots.';
-    document.getElementById('auction-bidder-avatar').textContent = '&#10003;';
-    document.getElementById('auction-bidder-avatar').style.borderColor = '#3fb950';
-    document.getElementById('auction-bidder-avatar').style.color = '#3fb950';
-    document.getElementById('auction-bidder-avatar').style.background = '#23863622';
+    const spotlight = document.getElementById('auction-lot-spotlight');
+    spotlight.style.borderColor = '#3fb950';
+    document.getElementById('auction-lot-name').innerHTML = '&#10003; All Lots Settled';
+    document.getElementById('auction-lot-name').style.color = '#3fb950';
+    document.getElementById('auction-lot-detail').textContent = 'Nash Equilibrium — no bidder can improve by switching.';
 
-    // Mark all lots as settled
-    auctionState.lots.forEach(s => {
-        const lotId = 'lot-' + s.replace(/[^a-zA-Z0-9]/g,'_');
-        const el = document.getElementById(lotId);
-        if (el) {
-            el.className = 'lot-card lot-won';
-            const conflictEl = el.querySelector('.lot-conflicts');
-            if (conflictEl) { conflictEl.innerHTML = '&#10003; Settled'; conflictEl.style.color = '#3fb950'; }
-        }
+    document.getElementById('auction-bidder-name').textContent = 'Auction complete';
+    document.getElementById('auction-bidder-meta').textContent = '';
+    const badge = document.getElementById('auction-result-badge');
+    badge.innerHTML = '&#10003; Nash';
+    badge.style.background = '#23863622';
+    badge.style.color = '#3fb950';
+
+    document.querySelectorAll('.bidder-card').forEach(c => {
+        if (c.classList.contains('bc-waiting')) return;
+        c.className = 'bidder-card bc-won';
     });
 }
 
 function auctionReset() {
-    auctionState.slotOccupants = {};
-    auctionState.lots.forEach(s => { auctionState.slotOccupants[s] = []; });
+    auctionState.bidderAssignments = {};
     if (auctionState.initialized) renderAuction();
 }
 
